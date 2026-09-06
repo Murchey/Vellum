@@ -11,7 +11,7 @@
 
 ## 国内镜像
 
-Android Gradle 插件、Google Maven、公共 Maven 依赖和 Gradle Wrapper 已切换到阿里云镜像。
+Android Gradle 插件、Google Maven 与公共 Maven 依赖已切换到阿里云镜像；Gradle Wrapper 使用已验证可提供 Gradle 9.1.0 的腾讯云镜像。
 Dart/Flutter 依赖使用腾讯云镜像脚本：
 
 ```bat

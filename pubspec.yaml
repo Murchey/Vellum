@@ -33,6 +33,10 @@ dependencies:
 
   # The interface is intentionally Cupertino-first.
   cupertino_icons: ^1.0.8
+  archive: ^4.0.7
+  file_picker: ^10.3.8
+  path_provider: ^2.1.5
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
