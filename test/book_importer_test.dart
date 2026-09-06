@@ -107,7 +107,7 @@ void main() {
 
   test('preserves MOBI headings and quotes while removing Markdown syntax', () {
     const source =
-        '<h2>HTML 标题</h2><blockquote>HTML 引用</blockquote>'
+        '<h2>HTML 标题</h2><blockquote><blockquote>HTML 引用</blockquote></blockquote>'
         '<p># Markdown 标题</p><p>> Markdown 引用</p>'
         '<p>**强调** 与 [链接标题](https://example.com) 和 `代码`</p>';
     final bytes = utf8.encode(source);

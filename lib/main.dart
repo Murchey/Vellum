@@ -12,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'services/book_importer.dart';
 import 'services/book_library.dart';
+import 'services/vellum_update_service.dart';
 
 Uri buildBingSearchUri(String query) {
   final encodedQuery = Uri.encodeQueryComponent(query.trim());
@@ -427,6 +428,42 @@ class _LibraryShellState extends State<LibraryShell> {
     }
   }
 
+  Future<void> _convertEbookToTxt() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['epub', 'mobi'],
+        withData: !Platform.isAndroid,
+      );
+      if (result == null) return;
+      final selected = result.files.single;
+      final bytes = selected.bytes ?? await File(selected.path!).readAsBytes();
+      final book = await compute(_decodeBookInBackground, <String, dynamic>{
+        'filename': selected.name,
+        'bytes': TransferableTypedData.fromList([bytes]),
+      });
+      final output = await _library.exportAsTxt(book);
+      if (!mounted) return;
+      await showCupertinoDialog<void>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: const Text('转换完成'),
+          content: Text('《${book.title}》已导出为 TXT。\n${output.path}'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('好'),
+            ),
+          ],
+        ),
+      );
+    } on BookImportException catch (error) {
+      if (mounted) await _showError(error.message);
+    } catch (error) {
+      if (mounted) await _showError('转换失败：$error');
+    }
+  }
+
   Future<void> _showError(String message) => showCupertinoDialog<void>(
     context: context,
     builder: (context) => CupertinoAlertDialog(
@@ -554,6 +591,7 @@ class _LibraryShellState extends State<LibraryShell> {
                 if (mounted) setState(() => _books.clear());
               },
               onClearReadingStates: _library.clearReadingStates,
+              onConvertEbookToTxt: _convertEbookToTxt,
             );
           },
         ),
@@ -1260,8 +1298,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   static final RegExp _headingMarkerPattern = RegExp(
     r'^\[\[vellum-heading:([1-6])\]\]',
   );
-  static final RegExp _quoteMarkerPattern = RegExp(r'^\[\[vellum-quote\]\]');
-  static final RegExp _listMarkerPattern = RegExp(r'^\[\[vellum-list\]\]');
+  static final RegExp _quoteMarkerPattern = RegExp(
+    r'^(?:\[\[vellum-quote\]\])+',
+  );
+  static final RegExp _listMarkerPattern = RegExp(r'^(?:\[\[vellum-list\]\])+');
 
   String _readerText(String source) => source
       .replaceFirst(_headingMarkerPattern, '')
@@ -1590,6 +1630,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       (fragment) => _bookmarks.contains(fragment.paragraphIndex),
     );
   }
+
+  Map<int, int> _chapterStartPages() => {
+    for (final entry in _chapterEntries())
+      entry.key: _pageForParagraph(entry.key) + 1,
+  };
 
   List<MapEntry<int, String>> _chapterEntries() {
     if (widget.book.tocEntries.isNotEmpty) {
@@ -2211,6 +2256,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   readingMode: _readingMode,
                   progress: _progress,
                   chapters: _chapterEntries(),
+                  chapterStartPages: _chapterStartPages(),
                   bookmarks: [
                     for (final bookmark in _bookmarks)
                       MapEntry(bookmark, _bookmarkSummary(bookmark)),
@@ -2403,15 +2449,20 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final heading = _headingMarkerPattern.firstMatch(paragraph);
     final isQuote = _quoteMarkerPattern.hasMatch(paragraph);
     final isList = _listMarkerPattern.hasMatch(paragraph);
+    final isTocHeading = widget.book.tocEntries.any(
+      (entry) => entry.paragraphIndex == paragraphIndex,
+    );
     final headingLevel = int.tryParse(heading?.group(1) ?? '');
-    final displayFontSize = headingLevel == null
-        ? _fontSize
-        : _fontSize + (7 - headingLevel).clamp(2, 6);
+    final effectiveHeading = headingLevel ?? (isTocHeading ? 2 : null);
+    // Keep title height aligned with the paginator. Weight, alignment and
+    // indentation already differentiate headings without letting a short
+    // chapter label overflow the measured page viewport.
+    final displayFontSize = _fontSize;
     final textStyle = TextStyle(
       fontFamily: _readerFontFamily,
       fontSize: displayFontSize,
       height: _lineSpacing.height,
-      fontWeight: headingLevel == null
+      fontWeight: effectiveHeading == null
           ? _readerFontWeight.value
           : FontWeight.w600,
       fontStyle: isQuote ? FontStyle.italic : null,
@@ -2423,7 +2474,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final needsFirstLineIndent =
         indentFirstLine &&
         paragraph.isNotEmpty &&
-        headingLevel == null &&
+        effectiveHeading == null &&
         !isQuote &&
         !isList;
     final displayParagraph = _readerText(paragraph);
@@ -2532,8 +2583,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (target == current) return;
     _pageController.animateToPage(
       target,
-      duration: const Duration(milliseconds: 120),
-      curve: Curves.linearToEaseOut,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeInOutCubic,
     );
   }
 }
@@ -2938,6 +2989,7 @@ class ReaderBottomControls extends StatefulWidget {
     required this.readingMode,
     required this.progress,
     required this.chapters,
+    required this.chapterStartPages,
     required this.bookmarks,
     required this.onProgress,
     required this.onJumpToParagraph,
@@ -2959,6 +3011,7 @@ class ReaderBottomControls extends StatefulWidget {
   final ReadingMode readingMode;
   final double progress;
   final List<MapEntry<int, String>> chapters;
+  final Map<int, int> chapterStartPages;
   final List<MapEntry<int, String>> bookmarks;
   final ValueChanged<double> onProgress;
   final ValueChanged<int> onJumpToParagraph;
@@ -3123,7 +3176,12 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                           ),
                           additionalInfo: _directoryTab == 1
                               ? Text('第 ${entry.key + 1} 段')
-                              : null,
+                              : Text(
+                                  '第 ${widget.chapterStartPages[entry.key] ?? 1} 页',
+                                  style: TextStyle(
+                                    color: VellumTheme.mutedOf(context),
+                                  ),
+                                ),
                           trailing: _directoryTab == 1
                               ? CupertinoButton(
                                   padding: EdgeInsets.zero,
@@ -3373,6 +3431,7 @@ class SettingsPage extends StatefulWidget {
   final Future<StorageUsage> Function() storageUsage;
   final Future<void> Function() onClearBooks;
   final Future<void> Function() onClearReadingStates;
+  final Future<void> Function() onConvertEbookToTxt;
   const SettingsPage({
     required this.onToggleTheme,
     required this.isDark,
@@ -3387,6 +3446,7 @@ class SettingsPage extends StatefulWidget {
     required this.storageUsage,
     required this.onClearBooks,
     required this.onClearReadingStates,
+    required this.onConvertEbookToTxt,
     super.key,
   });
 
@@ -3396,6 +3456,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   late Future<StorageUsage> _usage;
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
@@ -3404,6 +3465,67 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   void _refresh() => setState(() => _usage = widget.storageUsage());
+
+  Future<void> _checkForUpdate() async {
+    setState(() => _checkingUpdate = true);
+    try {
+      final release = await const VellumUpdateService().check();
+      if (!mounted) return;
+      if (release == null) {
+        await _showUpdateDialog('无法连接 GitHub Release，请稍后重试。');
+      } else if (!release.hasUpdate) {
+        await _showUpdateDialog('当前已是最新版本 V${release.currentVersion}。');
+      } else {
+        final assets = release.assets.keys.isEmpty
+            ? '未发布 APK 资产'
+            : release.assets.keys.join('\n');
+        await showCupertinoDialog<void>(
+          context: context,
+          builder: (context) => CupertinoAlertDialog(
+            title: Text('发现新版本 V${release.latestVersion}'),
+            content: Text(
+              '${release.notes.isEmpty ? 'GitHub Release 已发布更新。' : release.notes}\n\n可用安装包：\n$assets',
+            ),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('稍后'),
+              ),
+              CupertinoDialogAction(
+                isDefaultAction: true,
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await launchUrl(
+                    Uri.parse(release.releaseUrl),
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+                child: const Text('前往下载'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) await _showUpdateDialog('检查更新失败，请稍后重试。');
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
+  }
+
+  Future<void> _showUpdateDialog(String message) => showCupertinoDialog<void>(
+    context: context,
+    builder: (context) => CupertinoAlertDialog(
+      title: const Text('检查更新'),
+      content: Text(message),
+      actions: [
+        CupertinoDialogAction(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('好'),
+        ),
+      ],
+    ),
+  );
 
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '$bytes B';
@@ -3503,6 +3625,36 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                 ],
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              backgroundColor: pageBackground,
+              header: const Text('工具'),
+              children: [
+                CupertinoListTile(
+                  backgroundColor: pageBackground,
+                  backgroundColorActivated: pressedBackground,
+                  leading: const Icon(CupertinoIcons.doc_text),
+                  title: const Text('MOBI / EPUB 转 TXT'),
+                  additionalInfo: const Text('导出纯文本'),
+                  onTap: widget.onConvertEbookToTxt,
+                ),
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              backgroundColor: pageBackground,
+              header: const Text('软件更新'),
+              children: [
+                CupertinoListTile(
+                  backgroundColor: pageBackground,
+                  backgroundColorActivated: pressedBackground,
+                  leading: const Icon(CupertinoIcons.arrow_down_circle),
+                  title: const Text('检查 GitHub 更新'),
+                  additionalInfo: Text(
+                    _checkingUpdate ? '检查中…' : 'Murchey/Vellum',
+                  ),
+                  onTap: _checkingUpdate ? null : _checkForUpdate,
+                ),
               ],
             ),
             CupertinoListSection.insetGrouped(

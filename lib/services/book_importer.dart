@@ -1,4 +1,7 @@
 import 'package:archive/archive.dart';
+import 'package:html/dom.dart' as dom;
+import 'package:html/parser.dart' as html_parser;
+import 'package:markdown/markdown.dart' as markdown;
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -474,7 +477,7 @@ class BookImporter {
             caseSensitive: false,
           ),
           (match) =>
-              '[[anchor:$documentPath#${match.group(1)}]]${match.group(0)}',
+              '${match.group(0)}[[anchor:$documentPath#${match.group(1)}]]',
         )
         .replaceAllMapped(
           RegExp(
@@ -549,31 +552,70 @@ class BookImporter {
     return '$directory$href';
   }
 
-  String _htmlToText(String source) => source
-      .replaceAllMapped(
-        RegExp(r'<h([1-6])\b[^>]*>', caseSensitive: false),
-        (match) => '[[vellum-heading:${match.group(1)}]]',
-      )
-      .replaceAll(
-        RegExp(r'<blockquote\b[^>]*>', caseSensitive: false),
-        '[[vellum-quote]]',
-      )
-      .replaceAll(
-        RegExp(r'<li\b[^>]*>', caseSensitive: false),
-        '[[vellum-list]]',
-      )
-      .replaceAll(
-        RegExp(
-          r'<(br|/p|/h[1-6]|/div|/li|/blockquote)\b[^>]*>',
-          caseSensitive: false,
-        ),
-        '\n\n',
-      )
-      .replaceAll(RegExp(r'<[^>]*>'), '')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>');
+  String _htmlToText(String source) {
+    final fragment = html_parser.parseFragment(source);
+    final output = StringBuffer();
+
+    void paragraphBreak() {
+      if (output.isNotEmpty && !output.toString().endsWith('\n\n')) {
+        output.write('\n\n');
+      }
+    }
+
+    void visit(dom.Node node) {
+      if (node is dom.Text) {
+        output.write(node.data);
+        return;
+      }
+      if (node is! dom.Element) {
+        for (final child in node.nodes) {
+          visit(child);
+        }
+        return;
+      }
+      final tag = node.localName?.toLowerCase() ?? '';
+      if (tag == 'script' || tag == 'style' || tag == 'head') return;
+      if (tag == 'br') {
+        output.write('\n\n');
+        return;
+      }
+      if (tag == 'img') {
+        final recindex = node.attributes['recindex'];
+        if (recindex != null && recindex.isNotEmpty) {
+          output.write('[[image:$recindex]]');
+        }
+        return;
+      }
+      final block = {'p', 'div', 'section', 'article', 'pre', 'table'};
+      final heading = RegExp(r'^h[1-6]$').hasMatch(tag);
+      final quote = tag == 'blockquote';
+      final nestedQuote = quote && node.parent?.localName == 'blockquote';
+      final inQuote = node.parent?.localName == 'blockquote';
+      final listItem = tag == 'li';
+      final needsBreak =
+          (block.contains(tag) && !inQuote) ||
+          heading ||
+          (quote && !nestedQuote) ||
+          listItem;
+      if (needsBreak) {
+        paragraphBreak();
+      }
+      if (heading) output.write('[[vellum-heading:${tag.substring(1)}]]');
+      if (quote && !nestedQuote) output.write('[[vellum-quote]]');
+      if (listItem) output.write('[[vellum-list]]');
+      for (final child in node.nodes) {
+        visit(child);
+      }
+      if (needsBreak) {
+        paragraphBreak();
+      }
+    }
+
+    for (final node in fragment.nodes) {
+      visit(node);
+    }
+    return output.toString();
+  }
 
   String _decodeText(Uint8List bytes) {
     if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {
@@ -618,6 +660,21 @@ class BookImporter {
   }
 
   String _normalizeReaderMarkup(String paragraph) {
+    final looksMarkdown = RegExp(
+      r'^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)|!?(?:\[[^\]]+\]\([^)]*\))|(?:\*{1,3}|_{1,3}|`)',
+    ).hasMatch(paragraph);
+    if (looksMarkdown) {
+      final parsed = markdown.markdownToHtml(paragraph);
+      if (parsed.isNotEmpty) {
+        final semanticText = _htmlToText(
+          parsed,
+        ).replaceAll(RegExp(r'\s+'), ' ').trim();
+        return semanticText.replaceAllMapped(
+          RegExp(r'(\[\[vellum-(?:quote|list|heading:[1-6])\]\])\s+'),
+          (match) => match.group(1)!,
+        );
+      }
+    }
     var value = paragraph;
     final heading = RegExp(r'^(#{1,6})\s+').firstMatch(value);
     if (heading != null) {
@@ -630,6 +687,9 @@ class BookImporter {
       value =
           '[[vellum-list]]${value.replaceFirst(RegExp(r'^(?:[-*+]\s+|\d+[.)]\s+)'), '')}';
     }
+    value = value
+        .replaceAll(RegExp(r'^(?:\[\[vellum-quote\]\])+'), '[[vellum-quote]]')
+        .replaceAll(RegExp(r'^(?:\[\[vellum-list\]\])+'), '[[vellum-list]]');
     value = value.replaceAllMapped(
       RegExp(r'!?\[([^\]]*)\]\([^)]*\)'),
       (match) => match.group(1) ?? '',

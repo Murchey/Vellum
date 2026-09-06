@@ -236,6 +236,28 @@ class BookLibrary {
     );
   }
 
+  Future<File> exportAsTxt(ImportedBook book) async {
+    final directory = Directory(
+      '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_exports',
+    );
+    if (!await directory.exists()) await directory.create(recursive: true);
+    final safeTitle = book.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final file = File(
+      '${directory.path}${Platform.pathSeparator}$safeTitle.txt',
+    );
+    final marker = RegExp(r'^\[\[vellum-(?:heading:[1-6]|quote|list)\]\]+');
+    final image = RegExp(r'\[\[image:\d+\]\]');
+    final text = book.paragraphs
+        .map(
+          (paragraph) =>
+              paragraph.replaceFirst(marker, '').replaceAll(image, '').trim(),
+        )
+        .where((paragraph) => paragraph.isNotEmpty)
+        .join('\n\n');
+    await file.writeAsString(text, encoding: utf8, flush: true);
+    return file;
+  }
+
   Future<void> clearBooks() async {
     final file = await _file();
     if (await file.exists()) await file.delete();
