@@ -553,6 +553,10 @@ class BookImporter {
   }
 
   String _htmlToText(String source) {
+    // A complete DOM for a multi-megabyte MOBI duplicates the decoded book in
+    // memory and can stall Android during import. Keep DOM semantics for normal
+    // books, but use a bounded linear pass for large books.
+    if (source.length > 2 * 1024 * 1024) return _htmlToTextFast(source);
     final fragment = html_parser.parseFragment(source);
     final output = StringBuffer();
 
@@ -616,6 +620,32 @@ class BookImporter {
     }
     return output.toString();
   }
+
+  String _htmlToTextFast(String source) => source
+      .replaceAllMapped(
+        RegExp(r'<h([1-6])\b[^>]*>', caseSensitive: false),
+        (match) => '[[vellum-heading:${match.group(1)}]]',
+      )
+      .replaceAll(
+        RegExp(r'<blockquote\b[^>]*>', caseSensitive: false),
+        '[[vellum-quote]]',
+      )
+      .replaceAll(
+        RegExp(r'<li\b[^>]*>', caseSensitive: false),
+        '[[vellum-list]]',
+      )
+      .replaceAll(
+        RegExp(
+          r'<(br|/p|/h[1-6]|/div|/section|/article|/pre|/table|/li|/blockquote)\b[^>]*>',
+          caseSensitive: false,
+        ),
+        '\n\n',
+      )
+      .replaceAll(RegExp(r'<[^>]*>'), '')
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>');
 
   String _decodeText(Uint8List bytes) {
     if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {

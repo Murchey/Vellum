@@ -163,6 +163,20 @@
             </list>
           </value>
         </entry>
+        <entry key="http">
+          <value>
+            <list>
+              <option value="$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/http-1.6.0/lib" />
+            </list>
+          </value>
+        </entry>
+        <entry key="http_parser">
+          <value>
+            <list>
+              <option value="$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/http_parser-4.1.2/lib" />
+            </list>
+          </value>
+        </entry>
         <entry key="jni">
           <value>
             <list>
@@ -258,6 +272,20 @@
           <value>
             <list>
               <option value="$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_config-3.0.0/lib" />
+            </list>
+          </value>
+        </entry>
+        <entry key="package_info_plus">
+          <value>
+            <list>
+              <option value="$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_info_plus-9.0.1/lib" />
+            </list>
+          </value>
+        </entry>
+        <entry key="package_info_plus_platform_interface">
+          <value>
+            <list>
+              <option value="$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_info_plus_platform_interface-3.2.1/lib" />
             </list>
           </value>
         </entry>
@@ -540,6 +568,8 @@
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/flutter_plugin_android_lifecycle-2.0.35/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/hooks-2.0.2/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/html-0.15.7/lib" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/http-1.6.0/lib" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/http_parser-4.1.2/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/jni-1.0.3/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/jni_flutter-1.0.2/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/jni_util-1.0.0/lib" />
@@ -554,6 +584,8 @@
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/meta-1.18.0/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/objective_c-9.5.0/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_config-3.0.0/lib" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_info_plus-9.0.1/lib" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_info_plus_platform_interface-3.2.1/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/path-1.9.1/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/path_provider-2.1.6/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/path_provider_android-2.3.1/lib" />

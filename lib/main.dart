@@ -1060,7 +1060,8 @@ class ReaderPage extends StatefulWidget {
   State<ReaderPage> createState() => _ReaderPageState();
 }
 
-class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
+class _ReaderPageState extends State<ReaderPage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late double _fontSize;
   late String _readerFontFamily;
   late ReaderFontWeight _readerFontWeight;
@@ -1071,6 +1072,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   late final ScrollController _scrollController;
   late final PageController _pageController;
   int _currentPage = 0;
+  int _requestedPage = 0;
+  final List<int> _coverPageQueue = [];
+  AnimationController? _coverPageController;
+  int? _coverFromPage;
+  int? _coverToPage;
+  bool _coverJumpingPage = false;
   int _currentParagraph = 0;
   late List<int> _bookmarks;
   bool _bookmarkPullArmed = false;
@@ -1183,6 +1190,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _saveTimer?.cancel();
     _bookmarkNoticeTimer?.cancel();
     _saveState();
+    _coverPageController?.dispose();
     _scrollController.dispose();
     _pageController.dispose();
     super.dispose();
@@ -1611,6 +1619,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _pageController.hasClients && _pageController.page == 0) {
         _pageController.jumpToPage(target);
+        setState(() {
+          _currentPage = target;
+          _requestedPage = target;
+        });
       }
     });
   }
@@ -2173,8 +2185,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                               physics: const ClampingScrollPhysics(),
                               allowImplicitScrolling: true,
                               itemCount: _pageCount,
-                              onPageChanged: (index) =>
-                                  setState(() => _currentPage = index),
+                              onPageChanged: (index) {
+                                if (_coverJumpingPage) {
+                                  _coverJumpingPage = false;
+                                  return;
+                                }
+                                setState(() {
+                                  _currentPage = index;
+                                  _requestedPage = index;
+                                });
+                              },
                               itemBuilder: (context, index) => Padding(
                                 padding: EdgeInsets.fromLTRB(
                                   28,
@@ -2190,6 +2210,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            _coverTurnOverlay(context),
             _readerStatus(context),
             if (_showControls) _readerHeaderPanel(context),
             if (_isCurrentViewBookmarked)
@@ -2295,6 +2316,89 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _enqueueCoverTurn(int target) {
+    if (_coverPageQueue.isNotEmpty && _coverPageQueue.last == target) return;
+    _coverPageQueue.add(target);
+    _runNextCoverTurn();
+  }
+
+  void _runNextCoverTurn() {
+    if (!mounted ||
+        _coverPageController?.isAnimating == true ||
+        _coverPageQueue.isEmpty) {
+      return;
+    }
+    final target = _coverPageQueue.removeAt(0);
+    final from = _currentPage;
+    if (target == from) {
+      _runNextCoverTurn();
+      return;
+    }
+    _coverFromPage = from;
+    _coverToPage = target;
+    setState(() {});
+    final controller = _coverPageController ??=
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 320),
+        )..addListener(() {
+          if (mounted) setState(() {});
+        });
+    controller
+      ..reset()
+      ..forward().whenComplete(() {
+        if (!mounted) return;
+        _coverJumpingPage = true;
+        _pageController.jumpToPage(target);
+        setState(() {
+          _currentPage = target;
+          _coverFromPage = null;
+          _coverToPage = null;
+        });
+        _runNextCoverTurn();
+      });
+  }
+
+  Widget _coverPageSurface(BuildContext context, int page) => ColoredBox(
+    color: _backgroundFor(context),
+    child: Padding(
+      padding: EdgeInsets.fromLTRB(28, 20, 28, _readerBottomInset),
+      child: _readingPage(context, page),
+    ),
+  );
+
+  Widget _coverTurnOverlay(BuildContext context) {
+    final from = _coverFromPage;
+    final to = _coverToPage;
+    final controller = _coverPageController;
+    if (from == null || to == null || controller == null) {
+      return const SizedBox.shrink();
+    }
+    final progress = Curves.easeInOutCubic.transform(controller.value);
+    final isNext = to > from;
+    final width = MediaQuery.sizeOf(context).width;
+    final movingOffset = (isNext ? -progress : -1 + progress) * width;
+    final movingPage = isNext ? from : to;
+    final staticPage = isNext ? to : from;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ClipRect(
+          child: Stack(
+            children: [
+              Positioned.fill(child: _coverPageSurface(context, staticPage)),
+              Positioned.fill(
+                child: Transform.translate(
+                  offset: Offset(movingOffset, 0),
+                  child: _coverPageSurface(context, movingPage),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2577,15 +2681,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   void _changePage(BuildContext context, int delta) {
     if (!_pageController.hasClients) return;
-    final current = _pageController.page?.round() ?? 0;
     final pageCount = _pageCount;
-    final target = (current + delta).clamp(0, pageCount - 1);
-    if (target == current) return;
-    _pageController.animateToPage(
-      target,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeInOutCubic,
-    );
+    // Do not derive the next target from the animated viewport. Keeping an
+    // independent requested page makes quick repeated taps accumulate instead
+    // of repeatedly targeting the same in-flight page.
+    final base = _requestedPage.clamp(0, pageCount - 1);
+    final target = (base + delta).clamp(0, pageCount - 1);
+    if (target == base) return;
+    setState(() => _requestedPage = target);
+    _enqueueCoverTurn(target);
   }
 }
 
