@@ -24,6 +24,8 @@ class ImportedBook {
     this.linkTargets = const {},
     this.tocEntries = const [],
     this.imageBytes = const {},
+    this.metaParagraphCount,
+    this.id,
   });
 
   final String title;
@@ -33,6 +35,39 @@ class ImportedBook {
   final Map<int, int> linkTargets;
   final List<BookTocEntry> tocEntries;
   final Map<int, Uint8List> imageBytes;
+
+  /// Present when this instance is an index-only shell (paragraphs not loaded).
+  final int? metaParagraphCount;
+  final String? id;
+
+  bool get hasContentLoaded => paragraphs.isNotEmpty || (metaParagraphCount ?? 0) == 0;
+
+  int get paragraphCount =>
+      paragraphs.isNotEmpty ? paragraphs.length : (metaParagraphCount ?? 0);
+
+  String get storageId => id ?? BookLibraryIds.forBook(this);
+
+  ImportedBook asIndexShell() => ImportedBook(
+    id: storageId,
+    title: title,
+    format: format,
+    paragraphs: const [],
+    coverBytes: coverBytes,
+    metaParagraphCount: paragraphCount,
+    tocEntries: tocEntries.take(32).toList(),
+  );
+}
+
+abstract final class BookLibraryIds {
+  static String forBook(ImportedBook book) {
+    final source = '${book.format.name}\u0000${book.title}\u0000${book.paragraphCount}';
+    var hash = 0x811c9dc5;
+    for (final unit in source.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0x7fffffff;
+    }
+    return '${book.format.name}_${hash.toRadixString(16)}';
+  }
 }
 
 class _HtmlContent {
@@ -148,6 +183,7 @@ class BookImporter {
           if (image != null) imageBytes[entry.key] = image;
         }
       }
+      // Cover may already be among extracted images; keep EXTH cover as fallback.
       if (paragraphs.isEmpty)
         throw const BookImportException('MOBI 中没有可阅读的正文。');
       final coverBytes = _mobiCover(bytes, data, offsets, header);
@@ -184,13 +220,15 @@ class BookImporter {
     return null;
   }
 
+  /// MOBI `recindex` is 1-based: 1 maps to the first image record after text.
   Uint8List? _mobiImage(
     Uint8List bytes,
     List<int> offsets,
     int firstImageRecord,
     int imageIndex,
   ) {
-    final record = firstImageRecord + imageIndex;
+    if (imageIndex <= 0) return null;
+    final record = firstImageRecord + imageIndex - 1;
     if (record <= 0 || record >= offsets.length) return null;
     final start = offsets[record];
     final end = record + 1 < offsets.length
@@ -583,13 +621,46 @@ class BookImporter {
         output.write('\n\n');
         return;
       }
+      if (tag == 'hr') {
+        paragraphBreak();
+        return;
+      }
       if (tag == 'img') {
         final recindex = node.attributes['recindex'];
         if (recindex != null && recindex.isNotEmpty) {
           output.write('[[image:$recindex]]');
+        } else {
+          final src = node.attributes['src'] ?? '';
+          final fileIndex = RegExp(
+            r'(?:^|[/\\])(\d+)\.(?:jpe?g|png|gif)$',
+            caseSensitive: false,
+          ).firstMatch(src)?.group(1);
+          if (fileIndex != null) {
+            output.write('[[image:$fileIndex]]');
+          }
         }
         return;
       }
+      final inlineStyle = (node.attributes['style'] ?? '').toLowerCase();
+      final isBoldTag = tag == 'b' || tag == 'strong' || tag == 'th';
+      final isItalicTag =
+          tag == 'i' || tag == 'em' || tag == 'cite' || tag == 'var';
+      final isUnderlineTag = tag == 'u';
+      final styleBold = RegExp(
+        r'font-weight\s*:\s*(bold|[6-9]00)',
+      ).hasMatch(inlineStyle);
+      final styleItalic = RegExp(
+        r'font-style\s*:\s*italic',
+      ).hasMatch(inlineStyle);
+      final styleUnderline = RegExp(
+        r'text-decoration[^;]*underline',
+      ).hasMatch(inlineStyle);
+      final openBold = isBoldTag || styleBold;
+      final openItalic = isItalicTag || styleItalic;
+      final openUnderline = isUnderlineTag || styleUnderline;
+      if (openBold) output.write('[[b]]');
+      if (openItalic) output.write('[[i]]');
+      if (openUnderline) output.write('[[u]]');
       final block = {'p', 'div', 'section', 'article', 'pre', 'table'};
       final heading = RegExp(r'^h[1-6]$').hasMatch(tag);
       final quote = tag == 'blockquote';
@@ -610,6 +681,9 @@ class BookImporter {
       for (final child in node.nodes) {
         visit(child);
       }
+      if (openUnderline) output.write('[[/u]]');
+      if (openItalic) output.write('[[/i]]');
+      if (openBold) output.write('[[/b]]');
       if (needsBreak) {
         paragraphBreak();
       }
@@ -621,31 +695,141 @@ class BookImporter {
     return output.toString();
   }
 
-  String _htmlToTextFast(String source) => source
-      .replaceAllMapped(
-        RegExp(r'<h([1-6])\b[^>]*>', caseSensitive: false),
-        (match) => '[[vellum-heading:${match.group(1)}]]',
-      )
-      .replaceAll(
-        RegExp(r'<blockquote\b[^>]*>', caseSensitive: false),
-        '[[vellum-quote]]',
-      )
-      .replaceAll(
-        RegExp(r'<li\b[^>]*>', caseSensitive: false),
-        '[[vellum-list]]',
-      )
-      .replaceAll(
-        RegExp(
-          r'<(br|/p|/h[1-6]|/div|/section|/article|/pre|/table|/li|/blockquote)\b[^>]*>',
-          caseSensitive: false,
-        ),
-        '\n\n',
-      )
-      .replaceAll(RegExp(r'<[^>]*>'), '')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>');
+  String _htmlToTextFast(String source) {
+    final withInline = source
+        .replaceAllMapped(
+          RegExp(r'<(b|strong)\b[^>]*>', caseSensitive: false),
+          (_) => '[[b]]',
+        )
+        .replaceAllMapped(
+          RegExp(r'</(b|strong)\s*>', caseSensitive: false),
+          (_) => '[[/b]]',
+        )
+        .replaceAllMapped(
+          RegExp(r'<(i|em|cite|var)\b[^>]*>', caseSensitive: false),
+          (_) => '[[i]]',
+        )
+        .replaceAllMapped(
+          RegExp(r'</(i|em|cite|var)\s*>', caseSensitive: false),
+          (_) => '[[/i]]',
+        )
+        .replaceAllMapped(
+          RegExp(r'<u\b[^>]*>', caseSensitive: false),
+          (_) => '[[u]]',
+        )
+        .replaceAllMapped(
+          RegExp(r'</u\s*>', caseSensitive: false),
+          (_) => '[[/u]]',
+        );
+    final withBreaks = withInline
+        .replaceAllMapped(
+          RegExp(r'<h([1-6])\b[^>]*>', caseSensitive: false),
+          (match) => '[[vellum-heading:${match.group(1)}]]',
+        )
+        .replaceAll(
+          RegExp(r'<blockquote\b[^>]*>', caseSensitive: false),
+          '[[vellum-quote]]',
+        )
+        .replaceAll(
+          RegExp(r'<li\b[^>]*>', caseSensitive: false),
+          '[[vellum-list]]',
+        )
+        .replaceAll(
+          RegExp(
+            r'<(br|/p|/h[1-6]|/div|/section|/article|/pre|/table|/li|/blockquote|hr)\b[^>]*>',
+            caseSensitive: false,
+          ),
+          '\n\n',
+        )
+        .replaceAll(RegExp(r'<[^>]*>'), '');
+    return _decodeHtmlEntities(withBreaks);
+  }
+
+  static const Map<String, String> _htmlEntities = {
+    'nbsp': ' ',
+    'amp': '&',
+    'lt': '<',
+    'gt': '>',
+    'quot': '"',
+    'apos': "'",
+    'mdash': '—',
+    'ndash': '–',
+    'hellip': '…',
+    'lsquo': '‘',
+    'rsquo': '’',
+    'ldquo': '“',
+    'rdquo': '”',
+    'sbquo': '‚',
+    'bdquo': '„',
+    'bull': '•',
+    'middot': '·',
+    'copy': '©',
+    'reg': '®',
+    'trade': '™',
+    'deg': '°',
+    'plusmn': '±',
+    'times': '×',
+    'divide': '÷',
+    'sect': '§',
+    'para': '¶',
+    'dagger': '†',
+    'Dagger': '‡',
+    'permil': '‰',
+    'euro': '€',
+    'pound': '£',
+    'yen': '¥',
+    'cent': '¢',
+    'laquo': '«',
+    'raquo': '»',
+    'prime': '′',
+    'Prime': '″',
+    'dArr': '⇓',
+    'uArr': '⇑',
+    'rArr': '⇒',
+    'lArr': '⇐',
+    'hArr': '⇔',
+    'infin': '∞',
+    'ne': '≠',
+    'le': '≤',
+    'ge': '≥',
+    'alpha': 'α',
+    'beta': 'β',
+    'gamma': 'γ',
+    'delta': 'δ',
+    'pi': 'π',
+    'sigma': 'σ',
+    'omega': 'ω',
+  };
+
+  String _decodeHtmlEntities(String source) {
+    if (!source.contains('&')) return source;
+    final buffer = StringBuffer();
+    var cursor = 0;
+    for (final match in RegExp(
+      r'&(?:#x[0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]+);',
+    ).allMatches(source)) {
+      if (match.start > cursor) {
+        buffer.write(source.substring(cursor, match.start));
+      }
+      buffer.write(_decodeEntity(match.group(0)!));
+      cursor = match.end;
+    }
+    if (cursor < source.length) buffer.write(source.substring(cursor));
+    return buffer.toString();
+  }
+
+  String _decodeEntity(String entity) {
+    if (entity.length < 3 || !entity.endsWith(';')) return entity;
+    final body = entity.substring(1, entity.length - 1);
+    if (body.startsWith('#')) {
+      final isHex = body.length > 2 && (body[1] == 'x' || body[1] == 'X');
+      final digits = isHex ? body.substring(2) : body.substring(1);
+      final code = int.tryParse(digits, radix: isHex ? 16 : 10);
+      if (code == null || code <= 0 || code > 0x10FFFF) return entity;
+      return String.fromCharCodes([code]);
+    }
+    return _htmlEntities[body] ?? _htmlEntities[body.toLowerCase()] ?? entity;
+  }
 
   String _decodeText(Uint8List bytes) {
     if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {

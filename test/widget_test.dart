@@ -136,9 +136,9 @@ void main() {
 
     expect(find.byType(CupertinoNavigationBar), findsNothing);
     expect(find.text('测试书'), findsNWidgets(2));
-    expect(find.text('0.000%'), findsOneWidget);
+    expect(find.text('0%'), findsOneWidget);
     expect(find.text('目录'), findsOneWidget);
-    expect(find.text('切换深色'), findsOneWidget);
+    expect(find.text('深色'), findsOneWidget);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('阅读方式'), findsNothing);
 

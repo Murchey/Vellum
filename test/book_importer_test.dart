@@ -156,6 +156,57 @@ void main() {
     expect(book.tocEntries[1].title, '第二章');
     expect(book.tocEntries[1].paragraphIndex, 3);
   });
+
+  test('resolves MOBI recindex images with 1-based record mapping', () {
+    // 1x1 red JPEG and 1x1 blue JPEG (minimal valid SOI/EOI payloads).
+    final jpeg1 = Uint8List.fromList([
+      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+    ]);
+    final jpeg2 = Uint8List.fromList([
+      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0xFF, 0xD9,
+    ]);
+    final html = utf8.encode(
+      '<p>见图<img recindex="1"></p><p>再看<img recindex="2"></p>',
+    );
+    final book = importer.decode(
+      filename: 'images.mobi',
+      bytes: _mobiWithImagesFixture(html, [jpeg1, jpeg2]),
+    );
+
+    expect(book.imageBytes[0], isNotNull);
+    expect(book.imageBytes[1], isNotNull);
+    // recindex=1 must map to the first image record, recindex=2 to the second.
+    expect(book.imageBytes[0]!.length, jpeg1.length);
+    expect(book.imageBytes[1]!.length, jpeg2.length);
+    expect(book.imageBytes[0]![0], 0xFF);
+    expect(book.imageBytes[0]![1], 0xD8);
+    expect(book.imageBytes[1]!.last, 0xD9);
+    expect(
+      book.imageBytes[1]!.contains(0xDB),
+      isTrue,
+      reason: 'second image payload must not be the first record',
+    );
+  });
+
+  test('decodes HTML entities in large-book fast path', () {
+    // Force the >2MB fast path used for large MOBI files.
+    final filler = '字' * (2 * 1024 * 1024 + 64);
+    final source = '<p>Hello&nbsp;world &amp; friends &#8220;quote&#8221;</p>'
+        '<p>$filler</p>';
+    final bytes = utf8.encode(source);
+    final book = importer.decode(
+      filename: 'entities.mobi',
+      bytes: _mobiUncompressedFixture(bytes),
+    );
+
+    final first = book.paragraphs.first;
+    expect(first.contains('&nbsp;'), isFalse);
+    expect(first.contains('&#8220;'), isFalse);
+    expect(first, contains('Hello world & friends'));
+    expect(first, contains('“quote”'));
+  });
 }
 
 Uint8List _mobiUncompressedFixture(List<int> text) {
@@ -171,6 +222,44 @@ Uint8List _mobiUncompressedFixture(List<int> text) {
   data.setUint32(128, 65001, Endian.big);
   bytes.setRange(116, 120, [0x4d, 0x4f, 0x42, 0x49]);
   bytes.setRange(140, 140 + text.length, text);
+  return bytes;
+}
+
+/// Builds a MOBI with one text record followed by [images] image records.
+Uint8List _mobiWithImagesFixture(List<int> text, List<List<int>> images) {
+  // 4+ records need a record list that does not overlap the PalmDOC header.
+  const headerOffset = 128;
+  final textOffset = headerOffset + 40;
+  final imageBytes = images.expand((image) => image).toList();
+  final total = textOffset + text.length + imageBytes.length;
+  final bytes = Uint8List(total);
+  final data = ByteData.sublistView(bytes);
+  final recordCount = 2 + images.length;
+  data.setUint16(76, recordCount, Endian.big);
+  data.setUint32(78, headerOffset, Endian.big);
+  data.setUint32(86, textOffset, Endian.big);
+  var offset = textOffset + text.length;
+  for (var index = 0; index < images.length; index++) {
+    data.setUint32(94 + index * 8, offset, Endian.big);
+    offset += images[index].length;
+  }
+  data.setUint16(headerOffset, 1, Endian.big); // uncompressed
+  data.setUint32(headerOffset + 4, text.length, Endian.big);
+  data.setUint16(headerOffset + 8, 1, Endian.big); // textRecords
+  data.setUint16(headerOffset + 12, 0, Endian.big); // no encryption
+  data.setUint32(headerOffset + 28, 65001, Endian.big); // UTF-8
+  bytes.setRange(headerOffset + 16, headerOffset + 20, [
+    0x4d,
+    0x4f,
+    0x42,
+    0x49,
+  ]);
+  bytes.setRange(textOffset, textOffset + text.length, text);
+  var cursor = textOffset + text.length;
+  for (final image in images) {
+    bytes.setRange(cursor, cursor + image.length, image);
+    cursor += image.length;
+  }
   return bytes;
 }
 

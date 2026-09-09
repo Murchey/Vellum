@@ -7,34 +7,82 @@ import 'package:path_provider/path_provider.dart';
 
 import 'book_importer.dart';
 
-String _encodeBooksForStorage(List<ImportedBook> books) => jsonEncode(
-  books
+Map<String, dynamic> _bookContentJson(ImportedBook book) => {
+  'id': book.storageId,
+  'title': book.title,
+  'format': book.format.name,
+  'paragraphs': book.paragraphs,
+  'linkTargets': book.linkTargets.map(
+    (source, target) => MapEntry(source.toString(), target),
+  ),
+  'tocEntries': book.tocEntries
       .map(
-        (book) => {
-          'title': book.title,
-          'format': book.format.name,
-          'paragraphs': book.paragraphs,
-          'cover': book.coverBytes == null
-              ? null
-              : base64Encode(book.coverBytes!),
-          'linkTargets': book.linkTargets.map(
-            (source, target) => MapEntry(source.toString(), target),
-          ),
-          'tocEntries': book.tocEntries
-              .map(
-                (entry) => {
-                  'title': entry.title,
-                  'paragraphIndex': entry.paragraphIndex,
-                },
-              )
-              .toList(),
-          'imageBytes': book.imageBytes.map(
-            (index, bytes) => MapEntry(index.toString(), base64Encode(bytes)),
-          ),
+        (entry) => {
+          'title': entry.title,
+          'paragraphIndex': entry.paragraphIndex,
         },
       )
       .toList(),
+  'imageBytes': book.imageBytes.map(
+    (index, bytes) => MapEntry(index.toString(), base64Encode(bytes)),
+  ),
+};
+
+Map<String, dynamic> _bookIndexJson(ImportedBook book) => {
+  'id': book.storageId,
+  'title': book.title,
+  'format': book.format.name,
+  'paragraphCount': book.paragraphCount,
+  'cover': book.coverBytes == null ? null : base64Encode(book.coverBytes!),
+};
+
+String _encodeLibraryIndex(List<ImportedBook> books) =>
+    jsonEncode([for (final book in books) _bookIndexJson(book)]);
+
+String _encodeBookContent(ImportedBook book) =>
+    jsonEncode(_bookContentJson(book));
+
+ImportedBook _decodeIndexEntry(Map<String, dynamic> data) => ImportedBook(
+  id: data['id'] as String?,
+  title: data['title'] as String,
+  format: BookFormat.values.byName(data['format'] as String),
+  paragraphs: const [],
+  metaParagraphCount: (data['paragraphCount'] as num?)?.toInt() ?? 0,
+  coverBytes: data['cover'] == null
+      ? null
+      : Uint8List.fromList(base64Decode(data['cover'] as String)),
 );
+
+ImportedBook _decodeBookContent(Map<String, dynamic> data) {
+  final paragraphs = (data['paragraphs'] as List<dynamic>? ?? [])
+      .cast<String>();
+  return ImportedBook(
+    id: data['id'] as String?,
+    title: data['title'] as String,
+    format: BookFormat.values.byName(data['format'] as String),
+    paragraphs: paragraphs,
+    coverBytes: data['cover'] == null
+        ? null
+        : Uint8List.fromList(base64Decode(data['cover'] as String)),
+    linkTargets: (data['linkTargets'] as Map<String, dynamic>? ?? {}).map(
+      (key, value) => MapEntry(int.parse(key), value as int),
+    ),
+    tocEntries: (data['tocEntries'] as List<dynamic>? ?? [])
+        .map(
+          (entry) => BookTocEntry(
+            title: (entry as Map<String, dynamic>)['title'] as String,
+            paragraphIndex: entry['paragraphIndex'] as int,
+          ),
+        )
+        .toList(),
+    imageBytes: (data['imageBytes'] as Map<String, dynamic>? ?? {}).map(
+      (key, value) => MapEntry(
+        int.parse(key),
+        Uint8List.fromList(base64Decode(value as String)),
+      ),
+    ),
+  );
+}
 
 class FontPreferences {
   const FontPreferences({
@@ -127,48 +175,80 @@ class StorageUsage {
 class BookLibrary {
   const BookLibrary();
 
+  /// Loads lightweight index shells. Full text is loaded via [loadBookContent].
   Future<List<ImportedBook>> load() async {
     final file = await _file();
     if (!await file.exists()) return [];
     try {
-      final raw = jsonDecode(await file.readAsString()) as List<dynamic>;
-      return raw.map((entry) {
-        final data = entry as Map<String, dynamic>;
-        return ImportedBook(
-          title: data['title'] as String,
-          format: BookFormat.values.byName(data['format'] as String),
-          paragraphs: (data['paragraphs'] as List<dynamic>).cast<String>(),
-          coverBytes: data['cover'] == null
-              ? null
-              : Uint8List.fromList(base64Decode(data['cover'] as String)),
-          linkTargets: (data['linkTargets'] as Map<String, dynamic>? ?? {}).map(
-            (key, value) => MapEntry(int.parse(key), value as int),
-          ),
-          tocEntries: (data['tocEntries'] as List<dynamic>? ?? [])
-              .map(
-                (entry) => BookTocEntry(
-                  title: (entry as Map<String, dynamic>)['title'] as String,
-                  paragraphIndex: entry['paragraphIndex'] as int,
-                ),
-              )
-              .toList(),
-          imageBytes: (data['imageBytes'] as Map<String, dynamic>? ?? {}).map(
-            (key, value) => MapEntry(
-              int.parse(key),
-              Uint8List.fromList(base64Decode(value as String)),
-            ),
-          ),
-        );
-      }).toList();
+      final raw = jsonDecode(await file.readAsString());
+      if (raw is! List<dynamic>) return [];
+
+      // Legacy format: one array containing full books. Migrate once.
+      if (raw.isNotEmpty && raw.first is Map<String, dynamic>) {
+        final first = raw.first as Map<String, dynamic>;
+        if (first.containsKey('paragraphs')) {
+          final books = [
+            for (final entry in raw)
+              _decodeBookContent(entry as Map<String, dynamic>),
+          ];
+          await save(books);
+          return [for (final book in books) book.asIndexShell()];
+        }
+      }
+
+      return [
+        for (final entry in raw)
+          _decodeIndexEntry(entry as Map<String, dynamic>),
+      ];
     } catch (_) {
       return [];
     }
   }
 
+  /// Loads full reading content for one book. Falls back to index shell data.
+  Future<ImportedBook> loadBookContent(ImportedBook book) async {
+    if (book.hasContentLoaded) return book;
+    final file = await _bookContentFile(book.storageId);
+    if (await file.exists()) {
+      try {
+        final data =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        return _decodeBookContent(data);
+      } catch (_) {
+        // Fall through to empty shell below.
+      }
+    }
+    return book;
+  }
+
   Future<void> save(List<ImportedBook> books) async {
-    final file = await _file();
-    final encoded = await compute(_encodeBooksForStorage, books);
-    await file.writeAsString(encoded, flush: true);
+    final directory = await _booksDir();
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+
+    final fullBooks = <ImportedBook>[];
+    for (final book in books) {
+      fullBooks.add(book.hasContentLoaded ? book : await loadBookContent(book));
+    }
+
+    // Persist each book body separately so app start only parses the index.
+    await Future.wait([
+      for (final book in fullBooks)
+        () async {
+          final file = await _bookContentFile(book.storageId);
+          final encoded = await compute(_encodeBookContent, book);
+          await file.writeAsString(encoded, flush: true);
+        }(),
+    ]);
+
+    final index = await compute(_encodeLibraryIndex, fullBooks);
+    await (await _file()).writeAsString(index, flush: true);
+  }
+
+  Future<void> deleteBook(ImportedBook book) async {
+    final content = await _bookContentFile(book.storageId);
+    if (await content.exists()) await content.delete();
   }
 
   Future<ReadingState> loadReadingState(ImportedBook book) async {
@@ -225,14 +305,21 @@ class BookLibrary {
   }
 
   Future<StorageUsage> storageUsage() async {
-    final files = await Future.wait([_file(), _stateFile(), _fontFile()]);
-    final sizes = await Future.wait<int>(
-      files.map((file) async => await file.exists() ? await file.length() : 0),
-    );
+    final directory = await _booksDir();
+    var libraryBytes = 0;
+    if (await directory.exists()) {
+      await for (final entity in directory.list()) {
+        if (entity is File) libraryBytes += await entity.length();
+      }
+    }
+    final index = await _file();
+    if (await index.exists()) libraryBytes += await index.length();
+    final stateFile = await _stateFile();
+    final fontFile = await _fontFile();
     return StorageUsage(
-      libraryBytes: sizes[0],
-      readingStateBytes: sizes[1],
-      fontBytes: sizes[2],
+      libraryBytes: libraryBytes,
+      readingStateBytes: await stateFile.exists() ? await stateFile.length() : 0,
+      fontBytes: await fontFile.exists() ? await fontFile.length() : 0,
     );
   }
 
@@ -261,6 +348,12 @@ class BookLibrary {
   Future<void> clearBooks() async {
     final file = await _file();
     if (await file.exists()) await file.delete();
+    final directory = await _booksDir();
+    if (await directory.exists()) {
+      await for (final entity in directory.list()) {
+        if (entity is File) await entity.delete();
+      }
+    }
   }
 
   Future<void> clearReadingStates() async {
@@ -338,6 +431,16 @@ class BookLibrary {
   }
 
   String _key(ImportedBook book) => '${book.format.name}:${book.title}';
+
+  Future<Directory> _booksDir() async => Directory(
+    '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_books',
+  );
+
+  Future<File> _bookContentFile(String id) async {
+    final dir = await _booksDir();
+    final safe = id.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
+    return File('${dir.path}${Platform.pathSeparator}$safe.json');
+  }
 
   Future<File> _file() async => File(
     '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_library.json',

@@ -7,7 +7,13 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart'
-    show Scrollbar, SelectableText, SelectionArea, DefaultMaterialLocalizations;
+    show
+        Divider,
+        LinearProgressIndicator,
+        Scrollbar,
+        SelectableText,
+        SelectionArea,
+        DefaultMaterialLocalizations;
 import 'package:url_launcher/url_launcher.dart';
 
 import 'services/book_importer.dart';
@@ -200,20 +206,20 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
 abstract final class VellumTheme {
   static String fontFamily = 'Georgia';
   static String contentFontFamily = 'Georgia';
-  static const paper = Color(0xfff5f1e8);
-  static const card = Color(0xfffbf9f4);
-  static const ink = Color(0xff29251f);
-  static const muted = Color(0xff756d62);
-  static const accent = Color(0xff9c5b46);
-  static const line = Color(0xffe3ddd1);
+  static const paper = Color(0xfff1ece1);
+  static const card = Color(0xfffbf8f1);
+  static const ink = Color(0xff1c1917);
+  static const muted = Color(0xff78716c);
+  static const accent = Color(0xffa33d2e);
+  static const line = Color(0xffe2dbcd);
   // Reader fallback for the global dark UI. Reader paper choices stay
   // independent and may use their own deliberate text contrast.
-  static const darkPaper = Color(0xff0d1216);
-  static const darkCard = Color(0xff282621);
-  static const darkInk = Color(0xffeee7da);
-  static const darkMuted = Color(0xffb5aa9b);
-  static const darkAccent = Color(0xffd08a6e);
-  static const darkLine = Color(0xff484239);
+  static const darkPaper = Color(0xff111110);
+  static const darkCard = Color(0xff1c1917);
+  static const darkInk = Color(0xfff0ebe1);
+  static const darkMuted = Color(0xffa8a29e);
+  static const darkAccent = Color(0xffd97757);
+  static const darkLine = Color(0xff3a3530);
 
   static const light = CupertinoThemeData(
     brightness: Brightness.light,
@@ -298,6 +304,10 @@ abstract final class VellumTheme {
       CupertinoTheme.of(context).brightness == Brightness.dark
       ? darkPaper
       : card;
+
+  static Color softAccentOf(BuildContext context) => accentOf(
+    context,
+  ).withValues(alpha: .12);
 }
 
 class LibraryShell extends StatefulWidget {
@@ -335,6 +345,7 @@ class LibraryShell extends StatefulWidget {
 class _LibraryShellState extends State<LibraryShell> {
   final _books = <ImportedBook>[];
   final _library = const BookLibrary();
+  ReadingState? _continueState;
   int _tab = 0;
   bool _importing = false;
   String _importStage = '';
@@ -347,7 +358,17 @@ class _LibraryShellState extends State<LibraryShell> {
 
   Future<void> _loadLibrary() async {
     final books = await _library.load();
-    if (mounted) setState(() => _books.addAll(books));
+    ReadingState? continueState;
+    if (books.isNotEmpty) {
+      continueState = await _library.loadReadingState(books.first);
+    }
+    if (!mounted) return;
+    setState(() {
+      _books
+        ..clear()
+        ..addAll(books);
+      _continueState = continueState;
+    });
   }
 
   void _setImportStage(String stage) {
@@ -483,14 +504,15 @@ class _LibraryShellState extends State<LibraryShell> {
   }
 
   Future<void> _openBook(ImportedBook book) async {
-    final state = await _library.loadReadingState(book);
+    final full = await _library.loadBookContent(book);
+    final state = await _library.loadReadingState(full);
     if (!mounted) return;
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       CupertinoPageRoute(
         builder: (_) => ReaderPage(
-          book: book,
+          book: full,
           initialState: state,
-          onStateChanged: (value) => _library.saveReadingState(book, value),
+          onStateChanged: (value) => _library.saveReadingState(full, value),
           installedFonts: widget.installedFonts,
           activeFontName: widget.activeFontName,
           onActivateFont: _activateReaderFont,
@@ -498,6 +520,9 @@ class _LibraryShellState extends State<LibraryShell> {
         ),
       ),
     );
+    if (!mounted) return;
+    final latest = await _library.loadReadingState(full);
+    if (mounted) setState(() => _continueState = latest);
   }
 
   Future<void> _deleteBook(ImportedBook book) async {
@@ -522,6 +547,7 @@ class _LibraryShellState extends State<LibraryShell> {
     if (confirmed != true) return;
     setState(() => _books.remove(book));
     await _library.save(_books);
+    await _library.deleteBook(book);
     await _library.deleteReadingState(book);
   }
 
@@ -535,8 +561,9 @@ class _LibraryShellState extends State<LibraryShell> {
             onTap: (value) => setState(() => _tab = value),
             activeColor: VellumTheme.accentOf(context),
             inactiveColor: VellumTheme.mutedOf(context),
+            iconSize: 22,
             border: Border(top: BorderSide(color: VellumTheme.lineOf(context))),
-            backgroundColor: CupertinoTheme.of(context).barBackgroundColor,
+            backgroundColor: VellumTheme.readerChromeOf(context),
             items: const [
               BottomNavigationBarItem(
                 icon: Icon(CupertinoIcons.book),
@@ -560,6 +587,7 @@ class _LibraryShellState extends State<LibraryShell> {
             if (index == 0) {
               return HomePage(
                 books: _books,
+                continueState: _continueState,
                 onOpen: _openBook,
                 onImport: _importBook,
               );
@@ -601,11 +629,12 @@ class _LibraryShellState extends State<LibraryShell> {
               color: const Color(0x66000000),
               child: Center(
                 child: Container(
-                  width: 276,
+                  width: 280,
                   padding: const EdgeInsets.all(24),
                   decoration: BoxDecoration(
                     color: VellumTheme.cardOf(context),
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: VellumTheme.lineOf(context)),
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -651,60 +680,262 @@ class _LibraryShellState extends State<LibraryShell> {
 
 class HomePage extends StatelessWidget {
   final List<ImportedBook> books;
+  final ReadingState? continueState;
   final ValueChanged<ImportedBook> onOpen;
   final VoidCallback onImport;
   const HomePage({
     required this.books,
     required this.onOpen,
     required this.onImport,
+    this.continueState,
     super.key,
   });
+
+  double get _continueProgress {
+    final state = continueState;
+    if (state == null || books.isEmpty) return 0;
+    final total = books.first.paragraphCount;
+    if (total <= 1) return 0;
+    return (state.paragraphIndex / (total - 1)).clamp(0.0, 1.0);
+  }
+
   @override
-  Widget build(BuildContext context) => CupertinoPageScaffold(
-    navigationBar: CupertinoNavigationBar(
-      middle: Text('VELLUM'),
-      trailing: CupertinoButton(
-        padding: EdgeInsets.zero,
-        onPressed: onImport,
-        child: Icon(CupertinoIcons.add),
+  Widget build(BuildContext context) {
+    final ink = VellumTheme.inkOf(context);
+    final muted = VellumTheme.mutedOf(context);
+
+    return CupertinoPageScaffold(
+      navigationBar: CupertinoNavigationBar(
+        middle: Text(
+          'VELLUM',
+          style: TextStyle(
+            fontFamily: VellumTheme.fontFamily,
+            letterSpacing: 2.2,
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+          ),
+        ),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          onPressed: onImport,
+          child: const Icon(CupertinoIcons.add),
+        ),
       ),
-    ),
-    child: SafeArea(
-      child: books.isEmpty
-          ? EmptyLibrary(onImport: onImport)
-          : ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Text(
-                  '继续阅读',
-                  style: TextStyle(
-                    fontFamily: VellumTheme.fontFamily,
-                    fontSize: 30,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                BookRow(book: books.first, onTap: () => onOpen(books.first)),
-                if (books.length > 1) ...[
-                  const SizedBox(height: 32),
+      child: SafeArea(
+        child: books.isEmpty
+            ? EmptyLibrary(onImport: onImport)
+            : ListView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                children: [
                   Text(
-                    '最近加入',
+                    '继续阅读',
                     style: TextStyle(
-                      fontSize: 13,
-                      color: VellumTheme.mutedOf(context),
+                      fontFamily: VellumTheme.fontFamily,
+                      fontSize: 28,
                       fontWeight: FontWeight.w600,
+                      color: ink,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  _ContinueCard(
+                    book: books.first,
+                    progress: _continueProgress,
+                    onTap: () => onOpen(books.first),
+                  ),
+                  if (books.length > 1) ...[
+                    const SizedBox(height: 28),
+                    Row(
+                      children: [
+                        Text(
+                          '最近加入',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: muted,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: .4,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${books.length - 1} 本',
+                          style: TextStyle(fontSize: 12, color: muted),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: VellumTheme.cardOf(context),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: VellumTheme.lineOf(context)),
+                      ),
+                      child: Column(
+                        children: [
+                          for (var i = 1; i < books.length; i++) ...[
+                            if (i > 1)
+                              Divider(
+                                height: 1,
+                                indent: 74,
+                                color: VellumTheme.lineOf(context),
+                              ),
+                            BookRow(
+                              book: books[i],
+                              onTap: () => onOpen(books[i]),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  Center(
+                    child: Text(
+                      '安静地读一本书',
+                      style: TextStyle(fontSize: 12, color: muted),
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _ContinueCard extends StatelessWidget {
+  const _ContinueCard({
+    required this.book,
+    required this.progress,
+    required this.onTap,
+  });
+
+  final ImportedBook book;
+  final double progress;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = VellumTheme.inkOf(context);
+    final muted = VellumTheme.mutedOf(context);
+    final accent = VellumTheme.accentOf(context);
+    final percent = (progress * 100).round();
+
+    return CupertinoButton(
+      padding: EdgeInsets.zero,
+      onPressed: onTap,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: VellumTheme.cardOf(context),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: VellumTheme.lineOf(context)),
+          boxShadow: [
+            BoxShadow(
+              color: CupertinoColors.black.withValues(
+                alpha: CupertinoTheme.of(context).brightness == Brightness.dark
+                    ? .25
+                    : .05,
+              ),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _CoverThumb(book: book, width: 78, height: 112),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontFamily: VellumTheme.fontFamily,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w600,
+                      color: ink,
+                      height: 1.25,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  ...books
-                      .skip(1)
-                      .map(
-                        (book) =>
-                            BookRow(book: book, onTap: () => onOpen(book)),
-                      ),
+                  Text(
+                    '${book.format.name.toUpperCase()} · ${book.paragraphCount} 段',
+                    style: TextStyle(fontSize: 12, color: muted),
+                  ),
+                  const SizedBox(height: 18),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: progress.clamp(0.0, 1.0),
+                      minHeight: 4,
+                      backgroundColor: VellumTheme.softAccentOf(context),
+                      valueColor: AlwaysStoppedAnimation(accent),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    percent == 0 ? '从这里开始' : '已读 $percent%',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ],
-              ],
+              ),
             ),
+            Icon(
+              CupertinoIcons.chevron_right,
+              size: 16,
+              color: muted.withValues(alpha: .7),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CoverThumb extends StatelessWidget {
+  const _CoverThumb({
+    required this.book,
+    required this.width,
+    required this.height,
+    this.radius = 6,
+  });
+
+  final ImportedBook book;
+  final double width;
+  final double height;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    height: height,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: VellumTheme.lineOf(context)),
+      ),
+      position: DecorationPosition.foreground,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: book.coverBytes == null
+            ? _DefaultCover(book: book)
+            : Image.memory(
+                book.coverBytes!,
+                fit: BoxFit.cover,
+                cacheWidth: (width * 2.5).round(),
+                errorBuilder: (_, _, _) => _DefaultCover(book: book),
+              ),
+      ),
     ),
   );
 }
@@ -724,23 +955,23 @@ class LibraryPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => CupertinoPageScaffold(
     navigationBar: CupertinoNavigationBar(
-      middle: Text('书库'),
+      middle: const Text('书库'),
       trailing: CupertinoButton(
         padding: EdgeInsets.zero,
         onPressed: onImport,
-        child: Icon(CupertinoIcons.add),
+        child: const Icon(CupertinoIcons.add),
       ),
     ),
     child: SafeArea(
       child: books.isEmpty
           ? EmptyLibrary(onImport: onImport)
           : GridView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                crossAxisSpacing: 14,
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
                 mainAxisSpacing: 20,
-                childAspectRatio: .52,
+                childAspectRatio: .62,
               ),
               itemCount: books.length,
               itemBuilder: (context, index) => BookGridCard(
@@ -763,27 +994,44 @@ class EmptyLibrary extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            CupertinoIcons.book,
-            size: 42,
-            color: VellumTheme.accentOf(context),
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: VellumTheme.softAccentOf(context),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              CupertinoIcons.book,
+              size: 34,
+              color: VellumTheme.accentOf(context),
+            ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 22),
           Text(
             '书库是空的',
             style: TextStyle(
               fontFamily: VellumTheme.fontFamily,
-              fontSize: 23,
+              fontSize: 24,
               fontWeight: FontWeight.w600,
+              color: VellumTheme.inkOf(context),
             ),
           ),
           const SizedBox(height: 8),
           Text(
-            '导入 EPUB、MOBI 或 TXT 电子书。',
-            style: TextStyle(color: VellumTheme.mutedOf(context)),
+            '导入 EPUB、MOBI 或 TXT，开始你的私人书房。',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: VellumTheme.mutedOf(context), height: 1.4),
           ),
-          const SizedBox(height: 22),
-          CupertinoButton.filled(onPressed: onImport, child: Text('导入电子书')),
+          const SizedBox(height: 24),
+          CupertinoButton.filled(
+            borderRadius: BorderRadius.circular(14),
+            onPressed: onImport,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              child: Text('导入电子书'),
+            ),
+          ),
         ],
       ),
     ),
@@ -802,81 +1050,98 @@ class BookGridCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Expanded(
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: CupertinoButton(
-                padding: EdgeInsets.zero,
-                onPressed: onTap,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: VellumTheme.lineOf(context),
-                      width: 1.2,
+  Widget build(BuildContext context) {
+    final muted = VellumTheme.mutedOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  onPressed: onTap,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: VellumTheme.lineOf(context),
+                        width: 1,
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: [
+                        BoxShadow(
+                          color: CupertinoColors.black.withValues(alpha: .06),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
                     ),
-                    borderRadius: BorderRadius.circular(5),
-                  ),
-                  position: DecorationPosition.foreground,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(5),
-                    child: book.coverBytes == null
-                        ? _DefaultCover(book: book)
-                        : Image.memory(
-                            book.coverBytes!,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, _, _) =>
-                                _DefaultCover(book: book),
-                          ),
+                    position: DecorationPosition.foreground,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(9),
+                      child: book.coverBytes == null
+                          ? _DefaultCover(book: book)
+                          : Image.memory(
+                              book.coverBytes!,
+                              fit: BoxFit.cover,
+                              cacheWidth: 640,
+                              errorBuilder: (_, _, _) =>
+                                  _DefaultCover(book: book),
+                            ),
+                    ),
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              top: 2,
-              right: 2,
-              child: CupertinoButton(
-                padding: const EdgeInsets.all(6),
-                minimumSize: const Size(30, 30),
-                onPressed: onDelete,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: CupertinoColors.white.withValues(alpha: .9),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: VellumTheme.lineOf(context),
-                      width: .8,
+              Positioned(
+                top: 6,
+                right: 6,
+                child: CupertinoButton(
+                  padding: const EdgeInsets.all(6),
+                  minimumSize: const Size(30, 30),
+                  onPressed: onDelete,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: CupertinoColors.systemGrey6.resolveFrom(context),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: VellumTheme.lineOf(context),
+                        width: .8,
+                      ),
                     ),
-                  ),
-                  child: const Icon(
-                    CupertinoIcons.delete,
-                    color: CupertinoColors.systemRed,
-                    size: 16,
+                    child: const Icon(
+                      CupertinoIcons.delete,
+                      color: CupertinoColors.systemRed,
+                      size: 15,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        book.title,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: VellumTheme.inkOf(context),
-          fontFamily: VellumTheme.fontFamily,
-          fontSize: 13,
-          height: 1.25,
+        const SizedBox(height: 10),
+        Text(
+          book.title,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: VellumTheme.inkOf(context),
+            fontFamily: VellumTheme.fontFamily,
+            fontSize: 13,
+            height: 1.25,
+          ),
         ),
-      ),
-    ],
-  );
+        const SizedBox(height: 4),
+        Text(
+          '${book.format.name.toUpperCase()} · ${book.paragraphCount} 段',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: muted, fontSize: 11),
+        ),
+      ],
+    );
+  }
 }
 
 class _DefaultCover extends StatelessWidget {
@@ -885,7 +1150,16 @@ class _DefaultCover extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-    color: VellumTheme.accentOf(context).withValues(alpha: .82),
+    decoration: BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          VellumTheme.accentOf(context).withValues(alpha: .88),
+          VellumTheme.accentOf(context).withValues(alpha: .62),
+        ],
+      ),
+    ),
     alignment: Alignment.center,
     padding: const EdgeInsets.all(12),
     child: Text(
@@ -895,7 +1169,7 @@ class _DefaultCover extends StatelessWidget {
         color: CupertinoColors.white,
         fontSize: 11,
         fontWeight: FontWeight.w700,
-        letterSpacing: 1.2,
+        letterSpacing: 1.4,
       ),
     ),
   );
@@ -913,29 +1187,11 @@ class BookRow extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) => CupertinoButton(
-    padding: const EdgeInsets.symmetric(vertical: 12),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     onPressed: onTap,
     child: Row(
       children: [
-        Container(
-          width: 48,
-          height: 68,
-          decoration: BoxDecoration(
-            color: VellumTheme.accent.withValues(alpha: .8),
-            borderRadius: BorderRadius.circular(3),
-            border: Border.all(color: VellumTheme.lineOf(context), width: 1.2),
-          ),
-          child: Center(
-            child: Text(
-              book.format.name.toUpperCase(),
-              style: TextStyle(
-                color: CupertinoColors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
+        _CoverThumb(book: book, width: 42, height: 58, radius: 4),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
@@ -948,12 +1204,13 @@ class BookRow extends StatelessWidget {
                 style: TextStyle(
                   color: VellumTheme.inkOf(context),
                   fontFamily: VellumTheme.fontFamily,
-                  fontSize: 17,
+                  fontSize: 16,
+                  height: 1.25,
                 ),
               ),
               const SizedBox(height: 6),
               Text(
-                '${book.paragraphs.length} 段正文 · ${book.format.name.toUpperCase()}',
+                '${book.paragraphCount} 段 · ${book.format.name.toUpperCase()}',
                 style: TextStyle(
                   color: VellumTheme.mutedOf(context),
                   fontSize: 12,
@@ -977,7 +1234,7 @@ class BookRow extends StatelessWidget {
           Icon(
             CupertinoIcons.chevron_right,
             size: 16,
-            color: VellumTheme.mutedOf(context),
+            color: VellumTheme.mutedOf(context).withValues(alpha: .7),
           ),
       ],
     ),
@@ -1474,14 +1731,20 @@ class _ReaderPageState extends State<ReaderPage>
     // The constant reader footer is already excluded by _pageAvailableHeight.
     // Keep a small rasterization guard, but do not sacrifice several full
     // lines on every page: that produces visibly sparse reading pages.
-    final guardedHeight = (availableHeight - 20).clamp(
+    final guardedHeight = (availableHeight - 12).clamp(
       lineHeight * 2,
       availableHeight,
     );
-    final charsPerLine = (width / _fontSize).floor().clamp(6, 80);
+    final avgCharWidth = _estimateAverageCharWidth(
+      widget.book.paragraphs.take(40).join(),
+    );
+    final charsPerLine = (width / (_fontSize * avgCharWidth)).floor().clamp(
+      8,
+      96,
+    );
     final linesPerPage = (guardedHeight / lineHeight).floor().clamp(1, 80);
     final imageReserveLines =
-        ((size.height * .42 + 20) / lineHeight).ceil() + 1;
+        ((size.height * .36 + 16) / lineHeight).ceil() + 1;
     final titleLines =
         (_measureTitleHeight(context, width) / lineHeight).ceil() + 1;
     final regularCapacity = charsPerLine * linesPerPage;
@@ -1511,7 +1774,7 @@ class _ReaderPageState extends State<ReaderPage>
         final safeStart = start.clamp(0, source.length);
         final safeEnd = source.isEmpty
             ? 0
-            : (safeStart + capacity).clamp(safeStart, source.length);
+            : _estimateBreakOffset(source, safeStart, capacity);
         final text = source.isEmpty ? '' : source.substring(safeStart, safeEnd);
         final textLines = source.isEmpty
             ? 0
@@ -1535,6 +1798,47 @@ class _ReaderPageState extends State<ReaderPage>
       } while (start < source.length);
     }
     return pages;
+  }
+
+  /// Average advance width as a fraction of fontSize for CJK-heavy text.
+  double _estimateAverageCharWidth(String sample) {
+    if (sample.isEmpty) return .92;
+    var cjk = 0;
+    var latin = 0;
+    var spaces = 0;
+    for (final rune in sample.runes) {
+      if (rune == 0x20 || rune == 0x3000) {
+        spaces++;
+      } else if (rune >= 0x2E80 && rune <= 0x9FFF ||
+          rune >= 0xF900 && rune <= 0xFAFF ||
+          rune >= 0xFF00 && rune <= 0xFFEF) {
+        cjk++;
+      } else {
+        latin++;
+      }
+    }
+    final total = (cjk + latin + spaces).clamp(1, sample.length);
+    final weighted = cjk * 1.0 + latin * .52 + spaces * .3;
+    return (weighted / total).clamp(.45, 1.05);
+  }
+
+  /// Prefer a sentence-end break near the slice end so pages don't split mid-thought.
+  int _estimateBreakOffset(String source, int start, int capacity) {
+    final hardEnd = (start + capacity).clamp(start, source.length);
+    if (hardEnd >= source.length) return source.length;
+    final windowStart = start + (capacity * .82).floor();
+    for (var index = hardEnd; index > windowStart; index--) {
+      final unit = source.codeUnitAt(index - 1);
+      if (unit == 0x3002 || // 。
+          unit == 0xFF01 || // ！
+          unit == 0xFF1F || // ？
+          unit == 0x21 ||
+          unit == 0x3F ||
+          unit == 0x2E) {
+        return index;
+      }
+    }
+    return hardEnd;
   }
 
   double _measureTitleHeight(BuildContext context, double width) {
@@ -1955,9 +2259,16 @@ class _ReaderPageState extends State<ReaderPage>
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: VellumTheme.readerChromeOf(context),
-            borderRadius: BorderRadius.circular(14),
+            color: VellumTheme.readerChromeOf(context).withValues(alpha: .96),
+            borderRadius: BorderRadius.circular(16),
             border: Border.all(color: VellumTheme.lineOf(context)),
+            boxShadow: [
+              BoxShadow(
+                color: CupertinoColors.black.withValues(alpha: .08),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -1977,7 +2288,7 @@ class _ReaderPageState extends State<ReaderPage>
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  '${(_progress * 100).toStringAsFixed(3)}%',
+                  '${(_progress * 100).toStringAsFixed(_progress > 0 && _progress < 0.01 ? 1 : 0)}%',
                   style: TextStyle(
                     color: VellumTheme.accentOf(context),
                     fontSize: 13,
@@ -2524,6 +2835,7 @@ class _ReaderPageState extends State<ReaderPage>
               width: _fontSize * 1.05,
               height: _fontSize * 1.05,
               fit: BoxFit.contain,
+              cacheWidth: (_fontSize * 2.2).round(),
               errorBuilder: (_, _, _) => const SizedBox.shrink(),
             ),
           ),
@@ -2624,7 +2936,8 @@ class _ReaderPageState extends State<ReaderPage>
             image,
             fit: BoxFit.contain,
             width: double.infinity,
-            height: MediaQuery.sizeOf(context).height * .42,
+            height: MediaQuery.sizeOf(context).height * .36,
+            cacheWidth: (MediaQuery.sizeOf(context).width * 2).round(),
             errorBuilder: (context, error, stackTrace) =>
                 const SizedBox.shrink(),
           ),
@@ -3147,6 +3460,13 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
     decoration: BoxDecoration(
       color: VellumTheme.readerChromeOf(context),
       border: Border(top: BorderSide(color: VellumTheme.lineOf(context))),
+      boxShadow: [
+        BoxShadow(
+          color: CupertinoColors.black.withValues(alpha: .08),
+          blurRadius: 18,
+          offset: const Offset(0, -4),
+        ),
+      ],
     ),
     child: Column(
       mainAxisSize: MainAxisSize.min,
@@ -3162,7 +3482,7 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
         ),
         Container(height: 1, color: VellumTheme.lineOf(context)),
         SizedBox(
-          height: 62,
+          height: 64,
           child: Row(
             children: [
               _barButton(
@@ -3175,7 +3495,7 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
               _barButton(
                 context,
                 icon: _isDark ? CupertinoIcons.sun_max : CupertinoIcons.moon,
-                label: _isDark ? '切换浅色' : '切换深色',
+                label: _isDark ? '浅色' : '深色',
                 selected: false,
                 onPressed: widget.onToggleUiTheme ?? () {},
               ),
