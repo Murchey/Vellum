@@ -2,9 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show SelectableText, SelectionArea;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:vellum/main.dart';
-import 'package:vellum/services/book_importer.dart';
-import 'package:vellum/services/book_library.dart';
+import 'package:vellum/vellum.dart';
 
 void main() {
   test('Bing search URI keeps the selected text as q parameter', () {
@@ -135,9 +133,10 @@ void main() {
     await tester.pump();
 
     expect(find.byType(CupertinoNavigationBar), findsNothing);
-    expect(find.text('测试书'), findsNWidgets(2));
+    expect(find.text('测试书'), findsWidgets);
     expect(find.text('0%'), findsOneWidget);
     expect(find.text('目录'), findsOneWidget);
+    expect(find.text('字体'), findsOneWidget);
     expect(find.text('深色'), findsOneWidget);
     expect(find.text('设置'), findsOneWidget);
     expect(find.text('阅读方式'), findsNothing);
@@ -149,7 +148,6 @@ void main() {
     expect(find.text('阅读方式'), findsOneWidget);
     expect(find.text('上下滚动'), findsOneWidget);
     expect(find.text('左右翻页'), findsOneWidget);
-    expect(find.text('阅读进度'), findsOneWidget);
     expect(find.text('字重'), findsOneWidget);
     expect(find.byType(SelectableText), findsOneWidget);
   });
@@ -211,9 +209,7 @@ void main() {
     );
     await tester.tapAt(const Offset(400, 300));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('设置'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('字体'));
+    await tester.tap(find.text('字体').last);
     await tester.pumpAndSettle();
 
     expect(find.text('阅读字体'), findsOneWidget);

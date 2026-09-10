@@ -122,7 +122,7 @@ void main() {
       '[[vellum-quote]]HTML 引用',
       '[[vellum-heading:1]]Markdown 标题',
       '[[vellum-quote]]Markdown 引用',
-      '强调 与 链接标题 和 代码',
+      '[[b]]强调[[/b]] 与 链接标题 和 代码',
     ]);
   });
 

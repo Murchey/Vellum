@@ -6,6 +6,11 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:path_provider/path_provider.dart';
 
 import 'book_importer.dart';
+import 'font_storage.dart';
+import 'library_models.dart';
+
+export 'font_storage.dart';
+export 'library_models.dart';
 
 Map<String, dynamic> _bookContentJson(ImportedBook book) => {
   'id': book.storageId,
@@ -54,8 +59,7 @@ ImportedBook _decodeIndexEntry(Map<String, dynamic> data) => ImportedBook(
 );
 
 ImportedBook _decodeBookContent(Map<String, dynamic> data) {
-  final paragraphs = (data['paragraphs'] as List<dynamic>? ?? [])
-      .cast<String>();
+  final paragraphs = (data['paragraphs'] as List<dynamic>? ?? []).cast<String>();
   return ImportedBook(
     id: data['id'] as String?,
     title: data['title'] as String,
@@ -84,106 +88,17 @@ ImportedBook _decodeBookContent(Map<String, dynamic> data) {
   );
 }
 
-class FontPreferences {
-  const FontPreferences({
-    this.useForUi = false,
-    this.useForContent = false,
-    this.activeFont = '',
-  });
-
-  final bool useForUi;
-  final bool useForContent;
-  final String activeFont;
-}
-
-class InstalledFont {
-  const InstalledFont({required this.name, required this.family});
-
-  final String name;
-  final String family;
-}
-
-class ReadingState {
-  const ReadingState({
-    this.fontSize = 19,
-    this.readerFontFamily = 'Georgia',
-    this.readerFontWeight = 'regular',
-    this.lineSpacing = 'comfortable',
-    this.backgroundValue,
-    this.mode = 'scroll',
-    this.position = 0,
-    this.page = 0,
-    this.paragraphIndex = 0,
-    this.bookmarks = const [],
-  });
-
-  final double fontSize;
-  final String readerFontFamily;
-  final String readerFontWeight;
-  final String lineSpacing;
-  final int? backgroundValue;
-  final String mode;
-  final double position;
-  final int page;
-  final int paragraphIndex;
-  final List<int> bookmarks;
-
-  Map<String, dynamic> toJson() => {
-    'fontSize': fontSize,
-    'readerFontFamily': readerFontFamily,
-    'readerFontWeight': readerFontWeight,
-    'lineSpacing': lineSpacing,
-    'backgroundValue': backgroundValue,
-    'mode': mode,
-    'position': position,
-    'page': page,
-    'paragraphIndex': paragraphIndex,
-    'bookmarks': bookmarks,
-  };
-
-  factory ReadingState.fromJson(Map<String, dynamic> json) => ReadingState(
-    fontSize: (json['fontSize'] as num?)?.toDouble() ?? 19,
-    readerFontFamily: json['readerFontFamily'] as String? ?? 'Georgia',
-    readerFontWeight: json['readerFontWeight'] as String? ?? 'regular',
-    lineSpacing: json['lineSpacing'] as String? ?? 'comfortable',
-    backgroundValue: (json['backgroundValue'] as num?)?.toInt(),
-    mode: json['mode'] as String? ?? 'scroll',
-    position: (json['position'] as num?)?.toDouble() ?? 0,
-    page: (json['page'] as num?)?.toInt() ?? 0,
-    paragraphIndex: (json['paragraphIndex'] as num?)?.toInt() ?? 0,
-    bookmarks: (json['bookmarks'] as List<dynamic>? ?? [])
-        .whereType<num>()
-        .map((value) => value.toInt())
-        .toList(),
-  );
-}
-
-class StorageUsage {
-  const StorageUsage({
-    required this.libraryBytes,
-    required this.readingStateBytes,
-    required this.fontBytes,
-  });
-
-  final int libraryBytes;
-  final int readingStateBytes;
-  final int fontBytes;
-
-  int get totalBytes => libraryBytes + readingStateBytes + fontBytes;
-}
-
 class BookLibrary {
-  const BookLibrary();
+  const BookLibrary({this.fonts = const FontStorage()});
 
-  /// Loads lightweight index shells. Full text is loaded via [loadBookContent].
+  final FontStorage fonts;
+
   Future<List<ImportedBook>> load() async {
     final file = await _file();
     if (!await file.exists()) return [];
     try {
       final raw = jsonDecode(await file.readAsString());
       if (raw is! List<dynamic>) return [];
-
-      // Legacy format: one array containing full books. Migrate once.
       if (raw.isNotEmpty && raw.first is Map<String, dynamic>) {
         final first = raw.first as Map<String, dynamic>;
         if (first.containsKey('paragraphs')) {
@@ -195,7 +110,6 @@ class BookLibrary {
           return [for (final book in books) book.asIndexShell()];
         }
       }
-
       return [
         for (final entry in raw)
           _decodeIndexEntry(entry as Map<String, dynamic>),
@@ -205,18 +119,14 @@ class BookLibrary {
     }
   }
 
-  /// Loads full reading content for one book. Falls back to index shell data.
   Future<ImportedBook> loadBookContent(ImportedBook book) async {
     if (book.hasContentLoaded) return book;
     final file = await _bookContentFile(book.storageId);
     if (await file.exists()) {
       try {
-        final data =
-            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
         return _decodeBookContent(data);
-      } catch (_) {
-        // Fall through to empty shell below.
-      }
+      } catch (_) {}
     }
     return book;
   }
@@ -226,13 +136,10 @@ class BookLibrary {
     if (!await directory.exists()) {
       await directory.create(recursive: true);
     }
-
     final fullBooks = <ImportedBook>[];
     for (final book in books) {
       fullBooks.add(book.hasContentLoaded ? book : await loadBookContent(book));
     }
-
-    // Persist each book body separately so app start only parses the index.
     await Future.wait([
       for (final book in fullBooks)
         () async {
@@ -241,7 +148,6 @@ class BookLibrary {
           await file.writeAsString(encoded, flush: true);
         }(),
     ]);
-
     final index = await compute(_encodeLibraryIndex, fullBooks);
     await (await _file()).writeAsString(index, flush: true);
   }
@@ -270,8 +176,7 @@ class BookLibrary {
     Map<String, dynamic> states = {};
     if (await file.exists()) {
       try {
-        states =
-            (jsonDecode(await file.readAsString()) as Map<String, dynamic>);
+        states = (jsonDecode(await file.readAsString()) as Map<String, dynamic>);
       } catch (_) {
         states = {};
       }
@@ -284,25 +189,14 @@ class BookLibrary {
     final file = await _stateFile();
     if (!await file.exists()) return;
     try {
-      final states =
-          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final states = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       states.remove(_key(book));
       await file.writeAsString(jsonEncode(states));
-    } catch (_) {
-      // A corrupted state file will be overwritten by the next save.
-    }
+    } catch (_) {}
   }
 
-  Future<Uint8List?> loadFont() async {
-    final file = await _fontFile();
-    if (!await file.exists()) return null;
-    return Uint8List.fromList(await file.readAsBytes());
-  }
-
-  Future<void> saveFont(Uint8List bytes) async {
-    final file = await _fontFile();
-    await file.writeAsBytes(bytes, flush: true);
-  }
+  Future<Uint8List?> loadFont() => fonts.loadFont();
+  Future<void> saveFont(Uint8List bytes) => fonts.saveFont(bytes);
 
   Future<StorageUsage> storageUsage() async {
     final directory = await _booksDir();
@@ -315,7 +209,7 @@ class BookLibrary {
     final index = await _file();
     if (await index.exists()) libraryBytes += await index.length();
     final stateFile = await _stateFile();
-    final fontFile = await _fontFile();
+    final fontFile = await fonts.fontFile();
     return StorageUsage(
       libraryBytes: libraryBytes,
       readingStateBytes: await stateFile.exists() ? await stateFile.length() : 0,
@@ -323,24 +217,45 @@ class BookLibrary {
     );
   }
 
-  Future<File> exportAsTxt(ImportedBook book) async {
+  String bookAsPlainText(ImportedBook book) {
+    final marker = RegExp(
+      r'^\[\[vellum-(?:heading:[1-6]|quote|list|center)\]\]+',
+    );
+    final image = RegExp(r'\[\[image:\d+\]\]');
+    final inline = RegExp(r'\[\[/?[biu]\]\]');
+    return book.paragraphs
+        .map(
+          (paragraph) => paragraph
+              .replaceFirst(marker, '')
+              .replaceAll(image, '')
+              .replaceAll(inline, '')
+              .trim(),
+        )
+        .where((paragraph) => paragraph.isNotEmpty)
+        .join('\n\n');
+  }
+
+  String suggestedTxtFilename(ImportedBook book) {
+    final safeTitle = book.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    return safeTitle.isEmpty ? 'book.txt' : '$safeTitle.txt';
+  }
+
+  Future<File> exportAsTxt(ImportedBook book, {String? outputPath}) async {
+    final text = bookAsPlainText(book);
+    if (outputPath != null && outputPath.isNotEmpty) {
+      final file = File(outputPath);
+      final parent = file.parent;
+      if (!await parent.exists()) await parent.create(recursive: true);
+      await file.writeAsString(text, encoding: utf8, flush: true);
+      return file;
+    }
     final directory = Directory(
       '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_exports',
     );
     if (!await directory.exists()) await directory.create(recursive: true);
-    final safeTitle = book.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     final file = File(
-      '${directory.path}${Platform.pathSeparator}$safeTitle.txt',
+      '${directory.path}${Platform.pathSeparator}${suggestedTxtFilename(book)}',
     );
-    final marker = RegExp(r'^\[\[vellum-(?:heading:[1-6]|quote|list)\]\]+');
-    final image = RegExp(r'\[\[image:\d+\]\]');
-    final text = book.paragraphs
-        .map(
-          (paragraph) =>
-              paragraph.replaceFirst(marker, '').replaceAll(image, '').trim(),
-        )
-        .where((paragraph) => paragraph.isNotEmpty)
-        .join('\n\n');
     await file.writeAsString(text, encoding: utf8, flush: true);
     return file;
   }
@@ -361,74 +276,18 @@ class BookLibrary {
     if (await file.exists()) await file.delete();
   }
 
-  Future<FontPreferences> loadFontPreferences() async {
-    final file = await _fontPreferencesFile();
-    if (!await file.exists()) return const FontPreferences();
-    try {
-      final data =
-          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-      return FontPreferences(
-        useForUi: data['useForUi'] as bool? ?? false,
-        useForContent: data['useForContent'] as bool? ?? false,
-        activeFont: data['activeFont'] as String? ?? '',
-      );
-    } catch (_) {
-      return const FontPreferences();
-    }
-  }
-
-  Future<void> saveFontPreferences(FontPreferences preferences) async {
-    final file = await _fontPreferencesFile();
-    await file.writeAsString(
-      jsonEncode({
-        'useForUi': preferences.useForUi,
-        'useForContent': preferences.useForContent,
-        'activeFont': preferences.activeFont,
-      }),
-    );
-  }
-
-  Future<List<InstalledFont>> listFonts() async {
-    final dir = await _fontsDir();
-    if (!await dir.exists()) return [];
-
-    final fonts = <InstalledFont>[];
-    await for (final entity in dir.list()) {
-      if (entity is File && entity.path.endsWith('.ttf')) {
-        final name = entity.uri.pathSegments.last.replaceAll('.ttf', '');
-        final family = 'Font_${name.hashCode.abs()}';
-        fonts.add(InstalledFont(name: name, family: family));
-      }
-    }
-    return fonts;
-  }
-
-  Future<void> saveFontWithName(String name, Uint8List bytes) async {
-    final dir = await _fontsDir();
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    final file = File('${dir.path}${Platform.pathSeparator}$name.ttf');
-    await file.writeAsBytes(bytes, flush: true);
-  }
-
-  Future<Uint8List?> loadFontByName(String name) async {
-    final dir = await _fontsDir();
-    final file = File('${dir.path}${Platform.pathSeparator}$name.ttf');
-    if (!await file.exists()) return null;
-    return Uint8List.fromList(await file.readAsBytes());
-  }
-
-  Future<void> deleteFontByName(String name) async {
-    final dir = await _fontsDir();
-    final file = File('${dir.path}${Platform.pathSeparator}$name.ttf');
-    if (await file.exists()) await file.delete();
-  }
-
-  Future<void> clearFont() async {
-    final file = await _fontFile();
-    if (await file.exists()) await file.delete();
-  }
+  Future<FontPreferences> loadFontPreferences() =>
+      fonts.loadFontPreferences();
+  Future<void> saveFontPreferences(FontPreferences preferences) =>
+      fonts.saveFontPreferences(preferences);
+  Future<List<InstalledFont>> listFonts() => fonts.listFonts();
+  Future<void> saveFontWithName(String name, Uint8List bytes) =>
+      fonts.saveFontWithName(name, bytes);
+  Future<Uint8List?> loadFontByName(String name) =>
+      fonts.loadFontByName(name);
+  Future<void> deleteFontByName(String name) =>
+      fonts.deleteFontByName(name);
+  Future<void> clearFont() => fonts.clearFont();
 
   String _key(ImportedBook book) => '${book.format.name}:${book.title}';
 
@@ -448,17 +307,5 @@ class BookLibrary {
 
   Future<File> _stateFile() async => File(
     '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_reading_state.json',
-  );
-
-  Future<File> _fontPreferencesFile() async => File(
-    '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_font_preferences.json',
-  );
-
-  Future<File> _fontFile() async => File(
-    '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_font.ttf',
-  );
-
-  Future<Directory> _fontsDir() async => Directory(
-    '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_fonts',
   );
 }

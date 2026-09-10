@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
-const vellumGitHubRepository = 'Murchey/Vellum';
-const vellumGitHubRepositoryUrl = 'https://github.com/Murchey/Vellum';
+const vellumGitHubRepository = 'niriko-mu/Vellum';
+const vellumGitHubRepositoryUrl = 'https://github.com/niriko-mu/Vellum';
 
 class VellumReleaseInfo {
   const VellumReleaseInfo({
