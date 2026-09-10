@@ -63,6 +63,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Offset? _readerPointerDownPosition;
   final Map<int, GlobalKey> _paragraphKeys = {};
   bool _scrollPositionRestored = false;
+  bool _pagePositionRestored = false;
   int _scrollRestoreAttempts = 0;
   @override
   void initState() {
@@ -258,17 +259,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
   }
-  // Reader settings are an overlay. They must never change the reading
-  // viewport, page boundaries, scroll offset, or current page.
-  static const double _readerBottomInset = 96;
+  // Bottom chrome overlays the page; only the status line is reserved in the
+  // reading viewport so text does not leave a large empty strip at the bottom.
+  static const double _readerBottomInset = 28;
+
   double _pageAvailableHeight(BuildContext context) {
     final media = MediaQuery.of(context);
     return media.size.height -
         media.padding.top -
         media.padding.bottom -
-        20 -
-        _readerBottomInset -
-        4;
+        12 -
+        _readerBottomInset;
   }
 
   double _pageContentWidth(BuildContext context) {
@@ -353,19 +354,28 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   void _restorePageWhenReady() {
+    if (_pagePositionRestored || _readingMode != ReadingMode.page) return;
     final requested = widget.initialState.paragraphIndex;
     final starts = _pages;
     if (starts.isEmpty) return;
     final target = _pageForParagraph(requested).clamp(0, starts.length - 1);
-    if (target == 0) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _pageController.hasClients && _pageController.page == 0) {
-        _pageController.jumpToPage(target);
-        setState(() {
-          _currentPage = target;
-          _requestedPage = target;
-        });
+      if (!mounted || _pagePositionRestored) return;
+      if (!_pageController.hasClients) {
+        return;
       }
+      // Consume the one-shot restore. Never re-apply after the user navigates
+      // (TOC, progress, or tap paging).
+      _pagePositionRestored = true;
+      if (target == 0) return;
+      if (_currentPage != 0 || _requestedPage != 0) return;
+      final live = _pageController.page;
+      if (live == null || live != 0) return;
+      _pageController.jumpToPage(target);
+      setState(() {
+        _currentPage = target;
+        _requestedPage = target;
+      });
     });
   }
 
@@ -773,31 +783,36 @@ bool _isScrollIdle() => true;
                 alignment: Alignment.bottomCenter,
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
-                    maxHeight: MediaQuery.sizeOf(context).height * .72,
+                    maxHeight: MediaQuery.sizeOf(context).height * .58,
                   ),
-                  child: ReaderBottomControls(
-                    fontSize: _fontSize,
-                    readerFontWeight: _readerFontWeight,
-                    lineSpacing: _lineSpacing,
-                    background: _backgroundFor(context),
-                    readingMode: _readingMode,
-                    progress: _progress,
-                    canSeek: _canSeekProgress,
-                    currentParagraph: _activeParagraph,
-                    chapters: _chapterEntries(),
-                    chapterStartPages: _chapterStartPages(),
-                    bookmarks: [
-                      for (final bookmark in _bookmarks)
-                        MapEntry(bookmark, bookmarkSummary(widget.book.paragraphs, bookmark)),
-                    ],
-                    onProgress: _jumpToProgress,
-                    onJumpToParagraph: (paragraph) {
-                      setState(() => _showControls = false);
-                      _jumpToParagraph(paragraph);
-                    },
-                    onRemoveBookmark: _removeBookmark,
-                    onToggleUiTheme: widget.onToggleUiTheme,
-                    onShowFonts: _showFontPicker,
+                  child: SafeArea(
+                    top: false,
+                    child: ReaderBottomControls(
+                      fontSize: _fontSize,
+                      readerFontWeight: _readerFontWeight,
+                      lineSpacing: _lineSpacing,
+                      background: _backgroundFor(context),
+                      readingMode: _readingMode,
+                      progress: _progress,
+                      canSeek: _canSeekProgress,
+                      currentParagraph: _activeParagraph,
+                      chapters: _chapterEntries(),
+                      chapterStartPages: _chapterStartPages(),
+                      bookmarks: [
+                        for (final bookmark in _bookmarks)
+                          MapEntry(
+                            bookmark,
+                            bookmarkSummary(widget.book.paragraphs, bookmark),
+                          ),
+                      ],
+                      onProgress: _jumpToProgress,
+                      onJumpToParagraph: (paragraph) {
+                        setState(() => _showControls = false);
+                        _jumpToParagraph(paragraph);
+                      },
+                      onRemoveBookmark: _removeBookmark,
+                      onToggleUiTheme: widget.onToggleUiTheme,
+                      onShowFonts: _showFontPicker,
                     onFontSize: (value) {
                       setState(() {
                         _fontSize = value;
@@ -821,6 +836,7 @@ bool _isScrollIdle() => true;
                     onReadingMode: (value) {
                       _setReadingMode(value);
                     },
+                  ),
                   ),
                 ),
               ),
@@ -933,7 +949,10 @@ bool _isScrollIdle() => true;
     if (!_pageController.hasClients) return;
     final pageCount = _pageCount;
     if (pageCount <= 0) return;
-    final base = _requestedPage.clamp(0, pageCount - 1);
+    // Prefer the live page when the controller has one, so a TOC jump is
+    // not lost if `_requestedPage` is briefly stale.
+    final live = _pageController.hasClients ? _pageController.page?.round() : null;
+    final base = (live ?? _requestedPage).clamp(0, pageCount - 1);
     final target = (base + delta).clamp(0, pageCount - 1);
     if (target == base) return;
     setState(() {

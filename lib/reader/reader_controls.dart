@@ -114,124 +114,167 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
     widget.onProgress(value);
   }
 
+  /// Seek row + divider + function bar + top border.
+  /// Keep in sync with ReaderPage `_readerBottomInset`.
+  static const double chromeHeight = 4 + 56 + 1 + 56 + 1;
+
   @override
   Widget build(BuildContext context) {
     final percent = (_displayProgress * 100).round();
-    return Container(
-      decoration: BoxDecoration(
-        color: VellumTheme.readerChromeOf(context),
-        border: Border(top: BorderSide(color: VellumTheme.lineOf(context))),
-        boxShadow: [
-          BoxShadow(
-            color: CupertinoColors.black.withValues(alpha: .08),
-            blurRadius: 18,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AnimatedSize(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOutCubic,
-            child: switch (_openPanel) {
-              null => const SizedBox.shrink(),
-              ReaderControlPanel.directory => ReaderDirectoryPanel(
-                chapters: widget.chapters,
-                bookmarks: widget.bookmarks,
-                chapterStartPages: widget.chapterStartPages,
-                currentParagraph: widget.currentParagraph,
-                readingMode: widget.readingMode,
-                onJumpToParagraph: widget.onJumpToParagraph,
-                onRemoveBookmark: widget.onRemoveBookmark,
-                onClose: () => setState(() => _openPanel = null),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final available = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height * .58;
+        final panelMax = (available - chromeHeight).clamp(0.0, available);
+        return ClipRect(
+          child: MediaQuery.withClampedTextScaling(
+            minScaleFactor: 1,
+            maxScaleFactor: 1.15,
+            child: Container(
+              decoration: BoxDecoration(
+                color: VellumTheme.readerChromeOf(context),
+                border: Border(
+                  top: BorderSide(color: VellumTheme.lineOf(context)),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: CupertinoColors.black.withValues(alpha: .08),
+                    blurRadius: 18,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-              ReaderControlPanel.settings => ReaderSettingsPanel(
-                fontSize: widget.fontSize,
-                readerFontWeight: widget.readerFontWeight,
-                lineSpacing: widget.lineSpacing,
-                background: widget.background,
-                readingMode: widget.readingMode,
-                onFontSize: widget.onFontSize,
-                onReaderFontWeight: widget.onReaderFontWeight,
-                onLineSpacing: widget.onLineSpacing,
-                onBackground: widget.onBackground,
-                onReadingMode: widget.onReadingMode,
-                onShowFonts: widget.onShowFonts,
-                onClose: () => setState(() => _openPanel = null),
-              ),
-            },
-          ),
-          // Single seek bar — the only percentage display in the reader chrome.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 40,
-                  child: Text(
-                    '$percent%',
-                    textAlign: TextAlign.left,
-                    style: TextStyle(
-                      color: VellumTheme.accentOf(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_openPanel != null)
+                    ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: panelMax),
+                      child: ClipRect(
+                        child: AnimatedSize(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOutCubic,
+                          child: switch (_openPanel) {
+                            null => const SizedBox.shrink(),
+                            ReaderControlPanel.directory =>
+                              ReaderDirectoryPanel(
+                                chapters: widget.chapters,
+                                bookmarks: widget.bookmarks,
+                                chapterStartPages: widget.chapterStartPages,
+                                currentParagraph: widget.currentParagraph,
+                                readingMode: widget.readingMode,
+                                onJumpToParagraph: widget.onJumpToParagraph,
+                                onRemoveBookmark: widget.onRemoveBookmark,
+                                onClose: () =>
+                                    setState(() => _openPanel = null),
+                              ),
+                            ReaderControlPanel.settings => ReaderSettingsPanel(
+                              fontSize: widget.fontSize,
+                              readerFontWeight: widget.readerFontWeight,
+                              lineSpacing: widget.lineSpacing,
+                              background: widget.background,
+                              readingMode: widget.readingMode,
+                              onFontSize: widget.onFontSize,
+                              onReaderFontWeight: widget.onReaderFontWeight,
+                              onLineSpacing: widget.onLineSpacing,
+                              onBackground: widget.onBackground,
+                              onReadingMode: widget.onReadingMode,
+                              onShowFonts: widget.onShowFonts,
+                              onClose: () =>
+                                  setState(() => _openPanel = null),
+                            ),
+                          },
+                        ),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 2, 12, 2),
+                    child: SizedBox(
+                      height: 52,
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 42,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                '$percent%',
+                                maxLines: 1,
+                                style: TextStyle(
+                                  color: VellumTheme.accentOf(context),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: CupertinoSlider(
+                              value: _displayProgress,
+                              min: 0,
+                              max: 1,
+                              onChanged: widget.canSeek
+                                  ? _onSeekChanged
+                                  : null,
+                              onChangeEnd: widget.canSeek
+                                  ? _onSeekEnd
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                Expanded(
-                  child: CupertinoSlider(
-                    value: _displayProgress,
-                    min: 0,
-                    max: 1,
-                    onChanged: widget.canSeek ? _onSeekChanged : null,
-                    onChangeEnd: widget.canSeek ? _onSeekEnd : null,
+                  Container(height: 1, color: VellumTheme.lineOf(context)),
+                  SizedBox(
+                    height: 56,
+                    child: Row(
+                      children: [
+                        _barButton(
+                          context,
+                          icon: CupertinoIcons.list_bullet,
+                          label: '目录',
+                          selected: _openPanel ==
+                              ReaderControlPanel.directory,
+                          onPressed: () =>
+                              _togglePanel(ReaderControlPanel.directory),
+                        ),
+                        _barButton(
+                          context,
+                          icon: CupertinoIcons.textformat,
+                          label: '字体',
+                          selected: false,
+                          onPressed: widget.onShowFonts,
+                        ),
+                        _barButton(
+                          context,
+                          icon: _isDark
+                              ? CupertinoIcons.sun_max
+                              : CupertinoIcons.moon,
+                          label: _isDark ? '浅色' : '深色',
+                          selected: false,
+                          onPressed: widget.onToggleUiTheme ?? () {},
+                        ),
+                        _barButton(
+                          context,
+                          icon: CupertinoIcons.gear,
+                          label: '设置',
+                          selected: _openPanel ==
+                              ReaderControlPanel.settings,
+                          onPressed: () =>
+                              _togglePanel(ReaderControlPanel.settings),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-          Container(height: 1, color: VellumTheme.lineOf(context)),
-          SizedBox(
-            height: 54,
-            child: Row(
-              children: [
-                _barButton(
-                  context,
-                  icon: CupertinoIcons.list_bullet,
-                  label: '目录',
-                  selected: _openPanel == ReaderControlPanel.directory,
-                  onPressed: () => _togglePanel(ReaderControlPanel.directory),
-                ),
-                _barButton(
-                  context,
-                  icon: CupertinoIcons.textformat,
-                  label: '字体',
-                  selected: false,
-                  onPressed: widget.onShowFonts,
-                ),
-                _barButton(
-                  context,
-                  icon: _isDark
-                      ? CupertinoIcons.sun_max
-                      : CupertinoIcons.moon,
-                  label: _isDark ? '浅色' : '深色',
-                  selected: false,
-                  onPressed: widget.onToggleUiTheme ?? () {},
-                ),
-                _barButton(
-                  context,
-                  icon: CupertinoIcons.gear,
-                  label: '设置',
-                  selected: _openPanel == ReaderControlPanel.settings,
-                  onPressed: () => _togglePanel(ReaderControlPanel.settings),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -256,13 +299,22 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                 : VellumTheme.mutedOf(context),
           ),
           const SizedBox(height: 2),
-          Text(
-            label,
-            style: TextStyle(
-              color: selected
-                  ? VellumTheme.accentOf(context)
-                  : VellumTheme.inkOf(context),
-              fontSize: 11,
+          Expanded(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: selected
+                        ? VellumTheme.accentOf(context)
+                        : VellumTheme.inkOf(context),
+                    fontSize: 11,
+                  ),
+                ),
+              ),
             ),
           ),
         ],

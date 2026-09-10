@@ -51,106 +51,116 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     final emptyMessage = _tab == 0
         ? '这本书暂未识别出章节标题。'
         : '下拉阅读页面即可添加书签。';
-    final maxHeight = MediaQuery.sizeOf(context).height * .48;
-    return SizedBox(
-      height: maxHeight < 360 ? maxHeight : 360,
-      child: Column(
-        children: [
-          ReaderPanelTitle(
-            icon: _tab == 0
-                ? CupertinoIcons.list_bullet
-                : CupertinoIcons.bookmark,
-            title: _tab == 0 ? '目录' : '书签',
-            onClose: widget.onClose,
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            child: CupertinoSlidingSegmentedControl<int>(
-              groupValue: _tab,
-              children: const {0: Text('目录'), 1: Text('书签')},
-              onValueChanged: (value) {
-                if (value != null) setState(() => _tab = value);
-              },
-            ),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: entries.isEmpty
-                ? Center(
-                    child: Text(
-                      emptyMessage,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: VellumTheme.mutedOf(context)),
-                    ),
-                  )
-                : Scrollbar(
-                    thumbVisibility: true,
-                    child: ListView.builder(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      itemCount: entries.length,
-                      itemBuilder: (context, index) {
-                        final entry = entries[index];
-                        final isCurrentChapter =
-                            _tab == 0 &&
-                            _isCurrentChapter(entry.key, index, entries);
-                        return CupertinoListTile(
-                          backgroundColor: isCurrentChapter
-                              ? VellumTheme.softAccentOf(context)
-                              : VellumTheme.cardOf(context),
-                          backgroundColorActivated: VellumTheme.lineOf(
-                            context,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxH = constraints.maxHeight.isFinite
+            ? constraints.maxHeight
+            : MediaQuery.sizeOf(context).height * .42;
+        final height = maxH.clamp(180.0, 280.0);
+        return SizedBox(
+          height: height,
+          child: Column(
+            children: [
+              ReaderPanelTitle(
+                icon: _tab == 0
+                    ? CupertinoIcons.list_bullet
+                    : CupertinoIcons.bookmark,
+                title: _tab == 0 ? '目录' : '书签',
+                onClose: widget.onClose,
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: CupertinoSlidingSegmentedControl<int>(
+                  groupValue: _tab,
+                  children: const {0: Text('目录'), 1: Text('书签')},
+                  onValueChanged: (value) {
+                    if (value != null) setState(() => _tab = value);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+              Expanded(
+                child: entries.isEmpty
+                    ? Center(
+                        child: Text(
+                          emptyMessage,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: VellumTheme.mutedOf(context),
                           ),
-                          title: Text(
-                            entry.value,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isCurrentChapter
-                                  ? VellumTheme.accentOf(context)
-                                  : VellumTheme.inkOf(context),
-                              fontWeight: isCurrentChapter
-                                  ? FontWeight.w600
-                                  : null,
-                            ),
-                          ),
-                          additionalInfo: _tab == 1
-                              ? Text('第 ${entry.key + 1} 段')
-                              : Text(
-                                  widget.readingMode == ReadingMode.page
-                                      ? '第 ${widget.chapterStartPages[entry.key] ?? 1} 页'
-                                      : '第 ${entry.key + 1} 段',
-                                  style: TextStyle(
-                                    color: VellumTheme.mutedOf(context),
-                                  ),
+                        ),
+                      )
+                    : Scrollbar(
+                        thumbVisibility: true,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) {
+                            final entry = entries[index];
+                            final isCurrentChapter =
+                                _tab == 0 &&
+                                _isCurrentChapter(entry.key, index, entries);
+                            return CupertinoListTile(
+                              backgroundColor: isCurrentChapter
+                                  ? VellumTheme.softAccentOf(context)
+                                  : VellumTheme.cardOf(context),
+                              backgroundColorActivated: VellumTheme.lineOf(
+                                context,
+                              ),
+                              title: Text(
+                                entry.value,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: isCurrentChapter
+                                      ? VellumTheme.accentOf(context)
+                                      : VellumTheme.inkOf(context),
+                                  fontWeight: isCurrentChapter
+                                      ? FontWeight.w600
+                                      : null,
                                 ),
-                          trailing: _tab == 1
-                              ? CupertinoButton(
-                                  padding: EdgeInsets.zero,
-                                  minimumSize: const Size(32, 32),
-                                  onPressed: () async {
-                                    await widget.onRemoveBookmark(entry.key);
-                                    if (mounted) setState(() {});
-                                  },
-                                  child: const Icon(
-                                    CupertinoIcons.delete,
-                                    size: 17,
-                                  ),
-                                )
-                              : isCurrentChapter
-                              ? Icon(
-                                  CupertinoIcons.bookmark_fill,
-                                  size: 14,
-                                  color: VellumTheme.accentOf(context),
-                                )
-                              : null,
-                          onTap: () => widget.onJumpToParagraph(entry.key),
-                        );
-                      },
-                    ),
-                  ),
+                              ),
+                              additionalInfo: _tab == 1
+                                  ? Text('第 ${entry.key + 1} 段')
+                                  : Text(
+                                      widget.readingMode == ReadingMode.page
+                                          ? '第 ${widget.chapterStartPages[entry.key] ?? 1} 页'
+                                          : '第 ${entry.key + 1} 段',
+                                      style: TextStyle(
+                                        color: VellumTheme.mutedOf(context),
+                                      ),
+                                    ),
+                              trailing: _tab == 1
+                                  ? CupertinoButton(
+                                      padding: EdgeInsets.zero,
+                                      minimumSize: const Size(32, 32),
+                                      onPressed: () async {
+                                        await widget.onRemoveBookmark(entry.key);
+                                        if (mounted) setState(() {});
+                                      },
+                                      child: const Icon(
+                                        CupertinoIcons.delete,
+                                        size: 17,
+                                      ),
+                                    )
+                                  : isCurrentChapter
+                                  ? Icon(
+                                      CupertinoIcons.bookmark_fill,
+                                      size: 14,
+                                      color: VellumTheme.accentOf(context),
+                                    )
+                                  : null,
+                              onTap: () =>
+                                  widget.onJumpToParagraph(entry.key),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
