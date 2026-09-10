@@ -1,0 +1,157 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.0.1). Leave empty to use pubspec version.'
+        required: false
+        default: ''
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        default: false
+        type: boolean
+      skip_tests:
+        description: 'Skip analyze and tests'
+        required: false
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag
+        id: meta
+        run: |
+          set -euo pipefail
+          version=$(grep -E '^version:' pubspec.yaml | head -1 | awk '{print $2}' | cut -d'+' -f1)
+          tag="${{ github.event.inputs.tag }}"
+          # Prefer the pushed tag when the workflow is triggered by tag push.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            tag="${{ github.ref_name }}"
+          fi
+          if [ -z "$tag" ]; then
+            tag="v${version}"
+          fi
+          case "$tag" in
+            v*) ;;
+            *) tag="v${tag}" ;;
+          esac
+          if [ -z "$version" ]; then
+            echo "Cannot read version from pubspec.yaml" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $tag (pubspec $version)"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        env:
+          PUB_HOSTED_URL: https://pub.flutter-io.cn
+          FLUTTER_STORAGE_BASE_URL: https://storage.flutter-io.cn
+        run: flutter pub get
+
+      - name: Analyze
+        if: ${{ github.event.inputs.skip_tests != 'true' }}
+        run: flutter analyze
+
+      - name: Test
+        if: ${{ github.event.inputs.skip_tests != 'true' }}
+        run: flutter test
+
+      - name: Build APK
+        run: |
+          flutter build apk --release \
+            --build-name=${{ steps.meta.outputs.version }} \
+            --build-number=${{ github.run_number }}
+
+      - name: Build App Bundle
+        run: |
+          flutter build appbundle --release \
+            --build-name=${{ steps.meta.outputs.version }} \
+            --build-number=${{ github.run_number }}
+
+      - name: Create tag
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Tag-push trigger already has the tag; only create it for workflow_dispatch.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "Triggered by existing tag $TAG"
+            exit 0
+          fi
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists — reusing it."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          PRERELEASE: ${{ github.event.inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          notes="Vellum ${VERSION}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — uploading assets."
+            gh release upload "$TAG" \
+              build/app/outputs/flutter-apk/app-release.apk \
+              build/app/outputs/bundle/release/app-release.aab \
+              --clobber
+          else
+            gh release create "$TAG" \
+              build/app/outputs/flutter-apk/app-release.apk \
+              build/app/outputs/bundle/release/app-release.aab \
+              --title "$TAG" \
+              --notes "$notes" \
+              $prerelease_flag
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vellum-${{ steps.meta.outputs.tag }}
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
