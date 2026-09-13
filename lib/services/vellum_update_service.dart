@@ -3,21 +3,61 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 
-const vellumGitHubRepository = 'niriko-mu/Vellum';
-const vellumGitHubRepositoryUrl = 'https://github.com/niriko-mu/Vellum';
+/// Default update/download repository (Gitee).
+const vellumDefaultRepository = 'gitee.com/Murchey/vellum';
+const vellumDefaultRepositoryUrl = 'https://gitee.com/Murchey/vellum';
 
-/// Normalizes `owner/repo` or a GitHub repository URL to `owner/repo`.
-String? normalizeGitHubRepository(String input) {
+/// Parsed remote repository reference.
+class RepoRef {
+  const RepoRef({
+    required this.host,
+    required this.owner,
+    required this.repo,
+  });
+
+  /// e.g. `gitee.com` or `github.com`
+  final String host;
+  final String owner;
+  final String repo;
+
+  String get slug => '$owner/$repo';
+  bool get isGitee => host == 'gitee.com';
+
+  String get webUrl => 'https://$host/$owner/$repo';
+
+  String get latestReleaseApi => isGitee
+      ? 'https://gitee.com/api/v5/repos/$owner/$repo/releases/latest'
+      : 'https://api.github.com/repos/$owner/$repo/releases/latest';
+
+  @override
+  String toString() => '$host/$owner/$repo';
+}
+
+/// Parses `owner/repo`, `gitee.com/owner/repo`, or a full https URL.
+/// Bare `owner/repo` is treated as Gitee (the default host).
+RepoRef? parseUpdateRepository(String input) {
   var value = input.trim();
   if (value.isEmpty) return null;
   value = value.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
   value = value.replaceFirst(RegExp(r'^www\.', caseSensitive: false), '');
-  value = value.replaceFirst(RegExp(r'^github\.com/', caseSensitive: false), '');
   value = value.replaceAll(RegExp(r'/+$'), '');
+
+  var host = 'gitee.com';
+  if (value.toLowerCase().startsWith('github.com/')) {
+    host = 'github.com';
+    value = value.substring('github.com/'.length);
+  } else if (value.toLowerCase().startsWith('gitee.com/')) {
+    value = value.substring('gitee.com/'.length);
+  }
+
   final parts = value.split('/').where((p) => p.isNotEmpty).toList();
   if (parts.length < 2) return null;
-  return '${parts[0]}/${parts[1]}';
+  return RepoRef(host: host, owner: parts[0], repo: parts[1]);
 }
+
+/// Display label, e.g. `gitee.com/Murchey/vellum`.
+String? normalizeUpdateRepository(String input) =>
+    parseUpdateRepository(input)?.toString();
 
 class VellumReleaseInfo {
   const VellumReleaseInfo({
@@ -26,6 +66,7 @@ class VellumReleaseInfo {
     required this.notes,
     required this.releaseUrl,
     required this.assets,
+    this.repository = vellumDefaultRepository,
   });
 
   final String currentVersion;
@@ -33,6 +74,9 @@ class VellumReleaseInfo {
   final String notes;
   final String releaseUrl;
   final Map<String, String> assets;
+
+  /// Same source used for detection and download links.
+  final String repository;
 
   bool get hasUpdate => _isNewer(latestVersion, currentVersion);
 
@@ -57,18 +101,19 @@ class VellumReleaseInfo {
 class VellumUpdateService {
   const VellumUpdateService();
 
-  /// Checks GitHub Releases for [repository] (`owner/repo`).
-  /// Empty/null uses the built-in default repository.
+  /// Checks the configured repository (Gitee or GitHub).
+  /// Empty/null uses the built-in default (Gitee).
   Future<VellumReleaseInfo?> check({String? repository}) async {
-    final slug = normalizeGitHubRepository(repository ?? '') ??
-        vellumGitHubRepository;
+    final ref =
+        parseUpdateRepository(repository ?? '') ??
+        parseUpdateRepository(vellumDefaultRepository)!;
     final package = await PackageInfo.fromPlatform();
     final response = await http
         .get(
-          Uri.parse('https://api.github.com/repos/$slug/releases/latest'),
-          headers: const {'Accept': 'application/vnd.github+json'},
+          Uri.parse(ref.latestReleaseApi),
+          headers: const {'Accept': 'application/json'},
         )
-        .timeout(const Duration(seconds: 12));
+        .timeout(const Duration(seconds: 15));
     if (response.statusCode != 200) return null;
     final data = jsonDecode(response.body) as Map<String, dynamic>;
     final tag = (data['tag_name'] as String? ?? '').trim();
@@ -77,16 +122,22 @@ class VellumUpdateService {
     for (final value in data['assets'] as List<dynamic>? ?? const []) {
       final asset = value as Map<String, dynamic>;
       final name = asset['name'] as String? ?? '';
-      final url = asset['browser_download_url'] as String? ?? '';
-      if (name.endsWith('.apk') && url.isNotEmpty) assets[name] = url;
+      final url =
+          (asset['browser_download_url'] as String?) ??
+          (asset['download_url'] as String?) ??
+          '';
+      if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
+        assets[name] = url;
+      }
     }
-    final htmlUrl = data['html_url'] as String? ?? 'https://github.com/$slug';
+    final htmlUrl = data['html_url'] as String? ?? ref.webUrl;
     return VellumReleaseInfo(
       currentVersion: package.version,
       latestVersion: tag.replaceFirst(RegExp(r'^[vV]'), ''),
       notes: data['body'] as String? ?? '',
       releaseUrl: htmlUrl,
       assets: assets,
+      repository: ref.toString(),
     );
   }
 }

@@ -116,8 +116,16 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   String get _updateRepoLabel {
-    final normalized = normalizeGitHubRepository(_updateRepo);
-    return normalized ?? vellumGitHubRepository;
+    final normalized = normalizeUpdateRepository(_updateRepo);
+    return normalized ?? vellumDefaultRepository;
+  }
+
+  /// Compact form for list tiles: `Murchey/vellum` instead of `gitee.com/...`.
+  String get _shortUpdateRepoLabel {
+    final full = _updateRepoLabel;
+    final hostEnd = full.indexOf('/');
+    if (hostEnd < 0 || hostEnd + 1 >= full.length) return full;
+    return full.substring(hostEnd + 1);
   }
 
   Future<void> _editUpdateRepo() async {
@@ -129,11 +137,11 @@ class _SettingsPageState extends State<SettingsPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('填写 owner/repo 或 GitHub 仓库地址，留空则使用默认仓库。'),
+            const Text('支持 owner/repo、gitee.com/owner/repo 或 github.com/owner/repo；留空则使用默认仓库。'),
             const SizedBox(height: 12),
             CupertinoTextField(
               controller: controller,
-              placeholder: vellumGitHubRepository,
+              placeholder: vellumDefaultRepository,
               autofocus: true,
               maxLines: 2,
               minLines: 1,
@@ -159,7 +167,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
     controller.dispose();
     if (next == null || !mounted) return;
-    if (next.isNotEmpty && normalizeGitHubRepository(next) == null) {
+    if (next.isNotEmpty && normalizeUpdateRepository(next) == null) {
       await _showUpdateDialog('格式无效，请填写 owner/repo 或完整 GitHub 地址。');
       return;
     }
@@ -556,11 +564,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   leading: const Icon(CupertinoIcons.arrow_down_circle),
 
-                  title: const Text('检查 GitHub 更新'),
+                  title: const Text('检查更新'),
 
                   additionalInfo: Text(
 
-                    _checkingUpdate ? '检查中…' : _updateRepoLabel,
+                    _checkingUpdate ? '检查中…' : _shortUpdateRepoLabel,
 
                   ),
 
