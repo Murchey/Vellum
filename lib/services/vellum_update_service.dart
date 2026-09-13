@@ -7,6 +7,13 @@ import 'package:package_info_plus/package_info_plus.dart';
 const vellumDefaultRepository = 'gitee.com/Murchey/vellum';
 const vellumDefaultRepositoryUrl = 'https://gitee.com/Murchey/vellum';
 
+class UpdateCheckException implements Exception {
+  const UpdateCheckException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 /// Parsed remote repository reference.
 class RepoRef {
   const RepoRef({
@@ -15,7 +22,6 @@ class RepoRef {
     required this.repo,
   });
 
-  /// e.g. `gitee.com` or `github.com`
   final String host;
   final String owner;
   final String repo;
@@ -29,12 +35,14 @@ class RepoRef {
       ? 'https://gitee.com/api/v5/repos/$owner/$repo/releases/latest'
       : 'https://api.github.com/repos/$owner/$repo/releases/latest';
 
+  String get releasesApi => isGitee
+      ? 'https://gitee.com/api/v5/repos/$owner/$repo/releases?per_page=10'
+      : 'https://api.github.com/repos/$owner/$repo/releases?per_page=10';
+
   @override
   String toString() => '$host/$owner/$repo';
 }
 
-/// Parses `owner/repo`, `gitee.com/owner/repo`, or a full https URL.
-/// Bare `owner/repo` is treated as Gitee (the default host).
 RepoRef? parseUpdateRepository(String input) {
   var value = input.trim();
   if (value.isEmpty) return null;
@@ -55,7 +63,6 @@ RepoRef? parseUpdateRepository(String input) {
   return RepoRef(host: host, owner: parts[0], repo: parts[1]);
 }
 
-/// Display label, e.g. `gitee.com/Murchey/vellum`.
 String? normalizeUpdateRepository(String input) =>
     parseUpdateRepository(input)?.toString();
 
@@ -74,8 +81,6 @@ class VellumReleaseInfo {
   final String notes;
   final String releaseUrl;
   final Map<String, String> assets;
-
-  /// Same source used for detection and download links.
   final String repository;
 
   bool get hasUpdate => _isNewer(latestVersion, currentVersion);
@@ -101,43 +106,104 @@ class VellumReleaseInfo {
 class VellumUpdateService {
   const VellumUpdateService();
 
-  /// Checks the configured repository (Gitee or GitHub).
-  /// Empty/null uses the built-in default (Gitee).
+  static const _headers = {
+    'Accept': 'application/json',
+    'User-Agent': 'Vellum-App',
+  };
+
   Future<VellumReleaseInfo?> check({String? repository}) async {
     final ref =
         parseUpdateRepository(repository ?? '') ??
         parseUpdateRepository(vellumDefaultRepository)!;
     final package = await PackageInfo.fromPlatform();
-    final response = await http
-        .get(
-          Uri.parse(ref.latestReleaseApi),
-          headers: const {'Accept': 'application/json'},
-        )
-        .timeout(const Duration(seconds: 15));
-    if (response.statusCode != 200) return null;
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
+
+    Map<String, dynamic>? data;
+    try {
+      data = await _fetchLatest(ref);
+    } catch (error) {
+      throw UpdateCheckException('无法访问 ${ref.host}：$error');
+    }
+    if (data == null) {
+      throw UpdateCheckException(
+        '未能读取 ${ref.toString()} 的 Release，请确认仓库名与网络。',
+      );
+    }
+
     final tag = (data['tag_name'] as String? ?? '').trim();
-    if (tag.isEmpty) return null;
+    if (tag.isEmpty) {
+      throw UpdateCheckException('仓库 ${ref.toString()} 没有可用的 Release 标签。');
+    }
+
     final assets = <String, String>{};
-    for (final value in data['assets'] as List<dynamic>? ?? const []) {
-      final asset = value as Map<String, dynamic>;
-      final name = asset['name'] as String? ?? '';
-      final url =
-          (asset['browser_download_url'] as String?) ??
-          (asset['download_url'] as String?) ??
-          '';
-      if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
-        assets[name] = url;
+    final rawAssets = data['assets'];
+    if (rawAssets is List<dynamic>) {
+      for (final value in rawAssets) {
+        if (value is! Map) continue;
+        final asset = value.cast<String, dynamic>();
+        final name = asset['name'] as String? ?? '';
+        final url =
+            (asset['browser_download_url'] as String?) ??
+            (asset['download_url'] as String?) ??
+            '';
+        if (name.toLowerCase().endsWith('.apk') && url.isNotEmpty) {
+          assets[name] = url;
+        }
       }
     }
+
     final htmlUrl = data['html_url'] as String? ?? ref.webUrl;
     return VellumReleaseInfo(
       currentVersion: package.version,
       latestVersion: tag.replaceFirst(RegExp(r'^[vV]'), ''),
-      notes: data['body'] as String? ?? '',
+      notes: data['body'] as String? ?? data['name'] as String? ?? '',
       releaseUrl: htmlUrl,
       assets: assets,
       repository: ref.toString(),
     );
+  }
+
+  Future<Map<String, dynamic>?> _fetchLatest(RepoRef ref) async {
+    final latest = await _getJson(ref.latestReleaseApi);
+    if (latest != null) return latest;
+    // Fallback: some hosts (or private repos) 404 on /latest — use the list.
+    final list = await _getJsonList(ref.releasesApi);
+    if (list == null || list.isEmpty) return null;
+    for (final item in list) {
+      final prerelease = item['prerelease'] == true;
+      final draft = item['draft'] == true;
+      if (!draft && !prerelease) return item;
+    }
+    return list.first;
+  }
+
+  Future<Map<String, dynamic>?> _getJson(String url) async {
+    final response = await http
+        .get(Uri.parse(url), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw UpdateCheckException('HTTP ${response.statusCode}');
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is Map<String, dynamic>) return decoded;
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> _getJsonList(String url) async {
+    final response = await http
+        .get(Uri.parse(url), headers: _headers)
+        .timeout(const Duration(seconds: 15));
+    if (response.statusCode == 404) return null;
+    if (response.statusCode != 200) {
+      throw UpdateCheckException('HTTP ${response.statusCode}');
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is List) {
+      return [
+        for (final item in decoded)
+          if (item is Map<String, dynamic>) item,
+      ];
+    }
+    return null;
   }
 }

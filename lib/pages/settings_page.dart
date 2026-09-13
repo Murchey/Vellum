@@ -262,12 +262,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
       }
 
-    } catch (_) {
-
-      if (mounted) await _showUpdateDialog('检查更新失败，请稍后重试。');
-
+    } catch (error) {
+      if (mounted) {
+        await _showUpdateDialog('检查更新失败：$error');
+      }
     } finally {
-
       if (mounted) setState(() => _checkingUpdate = false);
 
     }
