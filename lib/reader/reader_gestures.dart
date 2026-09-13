@@ -4,7 +4,7 @@ import 'reader_models.dart';
 
 enum ReaderTapAction {
   none,
-  addBookmark,
+  toggleBookmark,
   toggleControls,
   previousPage,
   nextPage,
@@ -18,6 +18,8 @@ abstract final class ReaderGestures {
     return dx < width * 0.3 && dy < height * 0.25;
   }
 
+  static const double bookmarkPullThreshold = 96;
+
   static ReaderTapAction resolvePointerUp({
     required DateTime? downAt,
     required Offset? downPosition,
@@ -30,9 +32,9 @@ abstract final class ReaderGestures {
   }) {
     if (downAt == null || downPosition == null) return ReaderTapAction.none;
 
-    final downwardPull = upPosition.dy - downPosition.dy > 110;
+    final downwardPull = upPosition.dy - downPosition.dy > bookmarkPullThreshold;
     if (downwardPull && beginsAtScrollTop) {
-      return ReaderTapAction.addBookmark;
+      return ReaderTapAction.toggleBookmark;
     }
 
     if (DateTime.now().difference(downAt) >= const Duration(milliseconds: 450) ||

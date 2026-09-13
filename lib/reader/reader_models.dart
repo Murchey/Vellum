@@ -2,6 +2,20 @@ import 'package:flutter/cupertino.dart';
 
 enum ReadingMode { scroll, page }
 
+enum PageTurnStyle {
+  cover('覆盖'),
+  none('无动画');
+
+  const PageTurnStyle(this.label);
+  final String label;
+
+  static PageTurnStyle fromStorage(String value) =>
+      PageTurnStyle.values.firstWhere(
+        (style) => style.name == value,
+        orElse: () => PageTurnStyle.cover,
+      );
+}
+
 enum ReaderLineSpacing {
   compact('紧凑', 1.55),
   comfortable('舒适', 1.9),

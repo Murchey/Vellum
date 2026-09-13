@@ -41,6 +41,7 @@ class ReadingState {
     this.page = 0,
     this.paragraphIndex = 0,
     this.bookmarks = const [],
+    this.pageTurn = 'cover',
   });
 
   final double fontSize;
@@ -54,6 +55,9 @@ class ReadingState {
   final int paragraphIndex;
   final List<int> bookmarks;
 
+  /// `cover` or `none` — page turn animation style.
+  final String pageTurn;
+
   Map<String, dynamic> toJson() => {
     'fontSize': fontSize,
     'readerFontFamily': readerFontFamily,
@@ -65,6 +69,7 @@ class ReadingState {
     'page': page,
     'paragraphIndex': paragraphIndex,
     'bookmarks': bookmarks,
+    'pageTurn': pageTurn,
   };
 
   factory ReadingState.fromJson(Map<String, dynamic> json) => ReadingState(
@@ -81,6 +86,7 @@ class ReadingState {
         .whereType<num>()
         .map((value) => value.toInt())
         .toList(),
+    pageTurn: json['pageTurn'] as String? ?? 'cover',
   );
 }
 

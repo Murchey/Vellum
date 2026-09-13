@@ -172,11 +172,13 @@ class ReaderSettingsPanel extends StatelessWidget {
     required this.lineSpacing,
     required this.background,
     required this.readingMode,
+    required this.pageTurnStyle,
     required this.onFontSize,
     required this.onReaderFontWeight,
     required this.onLineSpacing,
     required this.onBackground,
     required this.onReadingMode,
+    required this.onPageTurnStyle,
     required this.onShowFonts,
     required this.onClose,
     super.key,
@@ -187,11 +189,13 @@ class ReaderSettingsPanel extends StatelessWidget {
   final ReaderLineSpacing lineSpacing;
   final Color background;
   final ReadingMode readingMode;
+  final PageTurnStyle pageTurnStyle;
   final ValueChanged<double> onFontSize;
   final ValueChanged<ReaderFontWeight> onReaderFontWeight;
   final ValueChanged<ReaderLineSpacing> onLineSpacing;
   final ValueChanged<Color> onBackground;
   final ValueChanged<ReadingMode> onReadingMode;
+  final ValueChanged<PageTurnStyle> onPageTurnStyle;
   final VoidCallback onShowFonts;
   final VoidCallback onClose;
 
@@ -223,6 +227,22 @@ class ReaderSettingsPanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
+          if (readingMode == ReadingMode.page) ...[
+            ReaderSettingRow(
+              label: '翻页效果',
+              child: CupertinoSlidingSegmentedControl<PageTurnStyle>(
+                groupValue: pageTurnStyle,
+                children: {
+                  for (final style in PageTurnStyle.values)
+                    style: Text(style.label),
+                },
+                onValueChanged: (value) {
+                  if (value != null) onPageTurnStyle(value);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           ReaderSettingRow(
             label: '行间距',
             child: CupertinoSlidingSegmentedControl<ReaderLineSpacing>(

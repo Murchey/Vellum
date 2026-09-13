@@ -39,13 +39,19 @@ class ReaderPage extends StatefulWidget {
   State<ReaderPage> createState() => _ReaderPageState();
 }
 
-class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
+class _ReaderPageState extends State<ReaderPage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late double _fontSize;
   late String _readerFontFamily;
   late ReaderFontWeight _readerFontWeight;
   late ReaderLineSpacing _lineSpacing;
   Color? _background;
   late ReadingMode _readingMode;
+  late PageTurnStyle _pageTurnStyle;
+  late final AnimationController _coverAnim;
+  int? _coverFromPage;
+  int? _coverToPage;
+  bool _coverJumping = false;
   bool _showControls = false;
   late final ScrollController _scrollController;
   late final PageController _pageController;
@@ -54,6 +60,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _currentParagraph = 0;
   late List<int> _bookmarks;
   bool _bookmarkPullArmed = false;
+  double _pullDownDistance = 0;
   String? _bookmarkNotice;
   Timer? _bookmarkNoticeTimer;
   int _batteryLevel = -1;
@@ -84,6 +91,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _readingMode = widget.initialState.mode == 'page'
         ? ReadingMode.page
         : ReadingMode.scroll;
+    _pageTurnStyle = PageTurnStyle.fromStorage(widget.initialState.pageTurn);
+    _coverAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    )..addListener(() {
+      if (mounted) setState(() {});
+    });
     _scrollController = ScrollController()
       ..addListener(() {
         _scheduleSave();
@@ -171,6 +185,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _saveTimer?.cancel();
     _bookmarkNoticeTimer?.cancel();
     _saveState();
+    _coverAnim.dispose();
     _scrollController.dispose();
     _pageController.dispose();
     super.dispose();
@@ -196,6 +211,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _addBookmarkAtCurrentPosition() async {
+    if (widget.book.paragraphs.isEmpty) return;
     final paragraph = _activeParagraph.clamp(
       0,
       widget.book.paragraphs.length - 1,
@@ -209,6 +225,20 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
     await _saveState();
     if (mounted) _showBookmarkNotice('书签已添加');
+  }
+
+  Future<void> _toggleBookmarkAtCurrentPosition() async {
+    if (widget.book.paragraphs.isEmpty) return;
+    final paragraph = _activeParagraph.clamp(
+      0,
+      widget.book.paragraphs.length - 1,
+    );
+    if (_bookmarks.contains(paragraph)) {
+      await _removeBookmark(paragraph);
+      if (mounted) _showBookmarkNotice('书签已取消');
+    } else {
+      await _addBookmarkAtCurrentPosition();
+    }
   }
 
   Future<void> _removeBookmark(int paragraph) async {
@@ -226,7 +256,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
     if (notification is ScrollEndNotification && _bookmarkPullArmed) {
       _bookmarkPullArmed = false;
-      _addBookmarkAtCurrentPosition();
+      _toggleBookmarkAtCurrentPosition();
     }
     return false;
   }
@@ -255,24 +285,22 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       page: _currentPage,
       paragraphIndex: paragraphIndex,
       bookmarks: List<int>.unmodifiable(_bookmarks),
+      pageTurn: _pageTurnStyle.name,
     );
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
   }
-  /// Bottom padding for the reading surface. Always reserve enough room for
-  /// the status line so the last body line stays inside the viewport even
-  /// when the control bar is collapsed.
-  double get _readerBottomInset => _showControls
-      ? kReaderBottomChromeHeight + 8
-      : 48;
+  /// Fixed bottom padding for the reading surface.
+  /// Controls are a floating overlay and must not change this value, so
+  /// opening the menu never reflows the page or re-paginates the book.
+  static const double _readerBottomInset = 48;
 
-  /// Viewport height for pagination. Uses the same bottom reservation as the
-  /// page/scroll padding so a page never lays out more text than can fit.
+  /// Viewport height for pagination. Shares the same fixed bottom reservation
+  /// as list/page padding so layout stays identical with controls open or not.
   double _pageAvailableHeight(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final view = MediaQuery.viewPaddingOf(context);
-    final bottom = _readerBottomInset;
-    return size.height - view.top - view.bottom - 20 - bottom;
+    return size.height - view.top - view.bottom - 20 - _readerBottomInset;
   }
 
   double _pageContentWidth(BuildContext context) {
@@ -549,19 +577,105 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _jumpToScrollParagraph(target);
   }
 
+  Widget _bookmarkPullIndicator(BuildContext context) {
+    final threshold = ReaderGestures.bookmarkPullThreshold;
+    final progress = (_pullDownDistance / threshold).clamp(0.0, 1.2);
+    final armed = _pullDownDistance >= threshold;
+    final already = _isCurrentViewBookmarked;
+    final icon = already
+        ? CupertinoIcons.bookmark_fill
+        : CupertinoIcons.bookmark;
+    final label = already
+        ? (armed ? '松开取消书签' : '下拉取消书签')
+        : (armed ? '松开添加书签' : '下拉添加书签');
+    final accent = VellumTheme.accentOf(context);
+
+    return IgnorePointer(
+      child: SafeArea(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: Transform.translate(
+            offset: Offset(0, -8 + (_pullDownDistance * 0.35).clamp(0.0, 48)),
+            child: Opacity(
+              opacity: (progress).clamp(0.15, 1.0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: VellumTheme.readerChromeOf(context).withValues(
+                    alpha: .96,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: VellumTheme.lineOf(context)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Transform.rotate(
+                      angle: (1 - progress.clamp(0.0, 1.0)) * 0.6,
+                      child: Icon(
+                        icon,
+                        size: 18,
+                        color: armed ? accent : VellumTheme.mutedOf(context),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      label,
+                      style: TextStyle(
+                        color: armed ? accent : VellumTheme.inkOf(context),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Color _backgroundFor(BuildContext context) =>
       _background ??
       (CupertinoTheme.of(context).brightness == Brightness.dark
           ? VellumTheme.darkPaper
           : VellumTheme.paper);
 bool _isScrollIdle() => true;
+  void _handleReaderPointerMove(PointerMoveEvent event) {
+    final down = _readerPointerDownPosition;
+    if (down == null) return;
+    final atTop =
+        _readingMode != ReadingMode.scroll ||
+        (!_scrollController.hasClients || _scrollController.offset <= 2);
+    if (!atTop) {
+      if (_pullDownDistance != 0) {
+        setState(() => _pullDownDistance = 0);
+      }
+      return;
+    }
+    final dy = event.position.dy - down.dy;
+    final next = dy > 0 ? dy : 0.0;
+    if ((next - _pullDownDistance).abs() > 0.5) {
+      setState(() => _pullDownDistance = next);
+    }
+  }
+
   void _handleReaderPointerUp(BuildContext context, PointerUpEvent event) {
     final pressedAt = _readerPointerDownAt;
     final pressedPosition = _readerPointerDownPosition;
     _readerPointerDownAt = null;
     _readerPointerDownPosition = null;
+    if (_pullDownDistance != 0) {
+      setState(() => _pullDownDistance = 0);
+    }
     final size = MediaQuery.sizeOf(context);
-    final beginsAtScrollTop = _readingMode != ReadingMode.scroll ||
+    final beginsAtScrollTop =
+        _readingMode != ReadingMode.scroll ||
         (!_scrollController.hasClients || _scrollController.offset <= 2);
     final action = ReaderGestures.resolvePointerUp(
       downAt: pressedAt,
@@ -576,9 +690,9 @@ bool _isScrollIdle() => true;
     switch (action) {
       case ReaderTapAction.none:
         break;
-      case ReaderTapAction.addBookmark:
+      case ReaderTapAction.toggleBookmark:
         _bookmarkPullArmed = false;
-        _addBookmarkAtCurrentPosition();
+        _toggleBookmarkAtCurrentPosition();
       case ReaderTapAction.toggleControls:
         setState(() => _showControls = !_showControls);
       case ReaderTapAction.previousPage:
@@ -627,9 +741,13 @@ bool _isScrollIdle() => true;
                     _readerPointerDownAt = DateTime.now();
                     _readerPointerDownPosition = event.position;
                   },
+                  onPointerMove: _handleReaderPointerMove,
                   onPointerCancel: (_) {
                     _readerPointerDownAt = null;
                     _readerPointerDownPosition = null;
+                    if (_pullDownDistance != 0) {
+                      setState(() => _pullDownDistance = 0);
+                    }
                   },
                   onPointerUp: (event) =>
                       _handleReaderPointerUp(context, event),
@@ -697,6 +815,9 @@ bool _isScrollIdle() => true;
                               allowImplicitScrolling: true,
                               itemCount: _pageCount,
                               onPageChanged: (index) {
+                                if (_coverJumping) {
+                                  return;
+                                }
                                 setState(() {
                                   _currentPage = index;
                                   _requestedPage = index;
@@ -718,6 +839,8 @@ bool _isScrollIdle() => true;
                 ),
               ),
             ),
+            if (_pullDownDistance > 8) _bookmarkPullIndicator(context),
+            if (_coverFromPage != null) _coverTurnOverlay(context),
             if (!_showControls)
               ReaderStatusBar(
                 progressLabel: _pageProgress,
@@ -839,6 +962,12 @@ bool _isScrollIdle() => true;
                     onReadingMode: (value) {
                       _setReadingMode(value);
                     },
+                    pageTurnStyle: _pageTurnStyle,
+                    onPageTurnStyle: (value) {
+                      setState(() => _pageTurnStyle = value);
+                      _saveTimer?.cancel();
+                      _saveState();
+                    },
                   ),
                   ),
                 ),
@@ -952,21 +1081,82 @@ bool _isScrollIdle() => true;
     if (!_pageController.hasClients) return;
     final pageCount = _pageCount;
     if (pageCount <= 0) return;
-    // Prefer the live page when the controller has one, so a TOC jump is
-    // not lost if `_requestedPage` is briefly stale.
-    final live = _pageController.hasClients ? _pageController.page?.round() : null;
+    final live = _pageController.hasClients
+        ? _pageController.page?.round()
+        : null;
     final base = (live ?? _requestedPage).clamp(0, pageCount - 1);
     final target = (base + delta).clamp(0, pageCount - 1);
     if (target == base) return;
+    if (_pageTurnStyle == PageTurnStyle.none) {
+      setState(() {
+        _requestedPage = target;
+        _currentPage = target;
+      });
+      _pageController.jumpToPage(target);
+      _scheduleSave();
+      return;
+    }
+    if (_coverAnim.isAnimating) return;
+    _coverFromPage = base;
+    _coverToPage = target;
     setState(() {
       _requestedPage = target;
       _currentPage = target;
     });
-    _pageController.animateToPage(
-      target,
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
+    _coverAnim
+      ..reset()
+      ..forward().whenComplete(() {
+        if (!mounted) return;
+        _coverJumping = true;
+        _pageController.jumpToPage(target);
+        setState(() {
+          _coverFromPage = null;
+          _coverToPage = null;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _coverJumping = false;
+        });
+        _scheduleSave();
+      });
+  }
+
+  Widget _coverTurnOverlay(BuildContext context) {
+    final from = _coverFromPage;
+    final to = _coverToPage;
+    if (from == null || to == null) return const SizedBox.shrink();
+    final progress = Curves.easeInOutCubic.transform(_coverAnim.value);
+    final isNext = to > from;
+    final width = MediaQuery.sizeOf(context).width;
+    final movingOffset = (isNext ? -progress : -1 + progress) * width;
+    final movingPage = isNext ? from : to;
+    final staticPage = isNext ? to : from;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ClipRect(
+          child: Stack(
+            children: [
+              Positioned.fill(child: _coverPageSurface(context, staticPage)),
+              Positioned.fill(
+                child: Transform.translate(
+                  offset: Offset(movingOffset, 0),
+                  child: _coverPageSurface(context, movingPage),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
-    _scheduleSave();
+  }
+
+  Widget _coverPageSurface(BuildContext context, int page) {
+    if (page < 0 || page >= _pageCount) return const SizedBox.expand();
+    return ColoredBox(
+      color: _backgroundFor(context),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(28, 20, 28, _readerBottomInset),
+        child: _readingPage(context, page),
+      ),
+    );
   }
 }

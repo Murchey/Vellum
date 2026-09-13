@@ -35,6 +35,8 @@ class ReaderBottomControls extends StatefulWidget {
     required this.onLineSpacing,
     required this.onBackground,
     required this.onReadingMode,
+    this.pageTurnStyle = PageTurnStyle.cover,
+    required this.onPageTurnStyle,
     super.key,
   });
 
@@ -59,6 +61,8 @@ class ReaderBottomControls extends StatefulWidget {
   final ValueChanged<ReaderLineSpacing> onLineSpacing;
   final ValueChanged<Color> onBackground;
   final ValueChanged<ReadingMode> onReadingMode;
+  final PageTurnStyle pageTurnStyle;
+  final ValueChanged<PageTurnStyle> onPageTurnStyle;
 
   @override
   State<ReaderBottomControls> createState() => _ReaderBottomControlsState();
@@ -178,11 +182,13 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                               lineSpacing: widget.lineSpacing,
                               background: widget.background,
                               readingMode: widget.readingMode,
+                              pageTurnStyle: widget.pageTurnStyle,
                               onFontSize: widget.onFontSize,
                               onReaderFontWeight: widget.onReaderFontWeight,
                               onLineSpacing: widget.onLineSpacing,
                               onBackground: widget.onBackground,
                               onReadingMode: widget.onReadingMode,
+                              onPageTurnStyle: widget.onPageTurnStyle,
                               onShowFonts: widget.onShowFonts,
                               onClose: () =>
                                   setState(() => _openPanel = null),
