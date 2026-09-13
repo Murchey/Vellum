@@ -21,6 +21,8 @@ class ImportedBook {
     required this.format,
     required this.paragraphs,
     this.coverBytes,
+    this.coverText,
+    this.folderId,
     this.linkTargets = const {},
     this.tocEntries = const [],
     this.imageBytes = const {},
@@ -31,6 +33,8 @@ class ImportedBook {
   final BookFormat format;
   final List<String> paragraphs;
   final Uint8List? coverBytes;
+  final String? coverText;
+  final String? folderId;
   final Map<int, int> linkTargets;
   final List<BookTocEntry> tocEntries;
   final Map<int, Uint8List> imageBytes;
@@ -41,12 +45,36 @@ class ImportedBook {
   int get paragraphCount =>
       paragraphs.isNotEmpty ? paragraphs.length : (metaParagraphCount ?? 0);
   String get storageId => id ?? BookLibraryIds.forBook(this);
+
+  ImportedBook copyWith({
+    Uint8List? coverBytes,
+    String? coverText,
+    String? folderId,
+    bool clearCoverImage = false,
+    bool clearCoverText = false,
+    bool clearFolder = false,
+  }) => ImportedBook(
+    id: id,
+    title: title,
+    format: format,
+    paragraphs: paragraphs,
+    coverBytes: clearCoverImage ? null : (coverBytes ?? this.coverBytes),
+    coverText: clearCoverText ? null : (coverText ?? this.coverText),
+    folderId: clearFolder ? null : (folderId ?? this.folderId),
+    linkTargets: linkTargets,
+    tocEntries: tocEntries,
+    imageBytes: imageBytes,
+    metaParagraphCount: metaParagraphCount,
+  );
+
   ImportedBook asIndexShell() => ImportedBook(
     id: storageId,
     title: title,
     format: format,
     paragraphs: const [],
     coverBytes: coverBytes,
+    coverText: coverText,
+    folderId: folderId,
     metaParagraphCount: paragraphCount,
     tocEntries: tocEntries.take(32).toList(),
   );

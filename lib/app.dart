@@ -4,6 +4,7 @@ import 'dart:async';
 
 
 
+
 import 'package:flutter/services.dart';
 
 
@@ -15,6 +16,7 @@ import 'package:flutter/cupertino.dart';
 
 
 
+import 'pages/cover_editor_sheet.dart';
 import 'pages/library_pages.dart';
 
 import 'pages/settings_page.dart';
@@ -429,6 +431,8 @@ class _LibraryShellState extends State<LibraryShell> {
 
   final _books = <ImportedBook>[];
 
+  final _folders = <LibraryFolder>[];
+
   final _library = const BookLibrary();
 
   ReadingState? _continueState;
@@ -456,6 +460,7 @@ class _LibraryShellState extends State<LibraryShell> {
   Future<void> _loadLibrary() async {
 
     final books = await _library.load();
+    final folders = await _library.loadFolders();
 
     ReadingState? continueState;
 
@@ -474,6 +479,10 @@ class _LibraryShellState extends State<LibraryShell> {
         ..clear()
 
         ..addAll(books);
+
+      _folders
+        ..clear()
+        ..addAll(folders);
 
       _continueState = continueState;
 
@@ -637,7 +646,81 @@ class _LibraryShellState extends State<LibraryShell> {
 
   }
 
+  Future<void> _editBookCover(ImportedBook book) async {
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (ctx) => CoverEditorSheet(
+        book: book,
+        onSave: ({
+          Uint8List? coverBytes,
+          String? coverText,
+          bool clearCoverImage = false,
+          bool clearCoverText = false,
+        }) async {
+          await _library.updateBookCover(
+            book,
+            coverBytes: coverBytes,
+            coverText: coverText,
+            clearCoverImage: clearCoverImage,
+            clearCoverText: clearCoverText,
+          );
+          if (!mounted) return;
+          final updated = book.copyWith(
+            coverBytes: coverBytes,
+            coverText: coverText,
+            clearCoverImage: clearCoverImage,
+            clearCoverText: clearCoverText,
+          );
+          setState(() {
+            final i = _books.indexWhere((b) => b.storageId == book.storageId);
+            if (i >= 0) _books[i] = updated;
+          });
+        },
+      ),
+    );
+  }
 
+  Future<void> _moveBookToFolder(ImportedBook book, String? folderId) async {
+    await _library.setBookFolder(book, folderId);
+    if (!mounted) return;
+    final updated = folderId == null
+        ? book.copyWith(clearFolder: true)
+        : book.copyWith(folderId: folderId);
+    setState(() {
+      final i = _books.indexWhere((b) => b.storageId == book.storageId);
+      if (i >= 0) _books[i] = updated;
+    });
+  }
+
+  Future<void> _createFolder(String name) async {
+    final folder = await _library.createFolder(name);
+    if (!mounted) return;
+    setState(() => _folders.add(folder));
+  }
+
+  Future<void> _deleteFolder(String folderId) async {
+    await _library.deleteFolder(folderId);
+    if (!mounted) return;
+    setState(() {
+      _folders.removeWhere((f) => f.id == folderId);
+      for (var i = 0; i < _books.length; i++) {
+        if (_books[i].folderId == folderId) {
+          _books[i] = _books[i].copyWith(clearFolder: true);
+        }
+      }
+    });
+  }
+
+  Future<void> _renameFolder(String folderId, String name) async {
+    await _library.renameFolder(folderId, name);
+    if (!mounted) return;
+    setState(() {
+      final i = _folders.indexWhere((f) => f.id == folderId);
+      if (i >= 0) {
+        _folders[i] = LibraryFolder(id: folderId, name: name);
+      }
+    });
+  }
 
   Future<void> _deleteBook(ImportedBook book) async {
 
@@ -779,11 +862,23 @@ class _LibraryShellState extends State<LibraryShell> {
 
                 books: _books,
 
+                folders: _folders,
+
                 onOpen: _openBook,
 
                 onImport: _importBook,
 
                 onDelete: _deleteBook,
+
+                onEditCover: _editBookCover,
+
+                onMoveToFolder: _moveBookToFolder,
+
+                onCreateFolder: _createFolder,
+
+                onDeleteFolder: _deleteFolder,
+
+                onRenameFolder: _renameFolder,
 
               );
 

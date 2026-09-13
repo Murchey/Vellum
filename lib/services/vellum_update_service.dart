@@ -6,6 +6,19 @@ import 'package:package_info_plus/package_info_plus.dart';
 const vellumGitHubRepository = 'niriko-mu/Vellum';
 const vellumGitHubRepositoryUrl = 'https://github.com/niriko-mu/Vellum';
 
+/// Normalizes `owner/repo` or a GitHub repository URL to `owner/repo`.
+String? normalizeGitHubRepository(String input) {
+  var value = input.trim();
+  if (value.isEmpty) return null;
+  value = value.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
+  value = value.replaceFirst(RegExp(r'^www\.', caseSensitive: false), '');
+  value = value.replaceFirst(RegExp(r'^github\.com/', caseSensitive: false), '');
+  value = value.replaceAll(RegExp(r'/+$'), '');
+  final parts = value.split('/').where((p) => p.isNotEmpty).toList();
+  if (parts.length < 2) return null;
+  return '${parts[0]}/${parts[1]}';
+}
+
 class VellumReleaseInfo {
   const VellumReleaseInfo({
     required this.currentVersion,
@@ -44,13 +57,15 @@ class VellumReleaseInfo {
 class VellumUpdateService {
   const VellumUpdateService();
 
-  Future<VellumReleaseInfo?> check() async {
+  /// Checks GitHub Releases for [repository] (`owner/repo`).
+  /// Empty/null uses the built-in default repository.
+  Future<VellumReleaseInfo?> check({String? repository}) async {
+    final slug = normalizeGitHubRepository(repository ?? '') ??
+        vellumGitHubRepository;
     final package = await PackageInfo.fromPlatform();
     final response = await http
         .get(
-          Uri.parse(
-            'https://api.github.com/repos/$vellumGitHubRepository/releases/latest',
-          ),
+          Uri.parse('https://api.github.com/repos/$slug/releases/latest'),
           headers: const {'Accept': 'application/vnd.github+json'},
         )
         .timeout(const Duration(seconds: 12));
@@ -65,11 +80,12 @@ class VellumUpdateService {
       final url = asset['browser_download_url'] as String? ?? '';
       if (name.endsWith('.apk') && url.isNotEmpty) assets[name] = url;
     }
+    final htmlUrl = data['html_url'] as String? ?? 'https://github.com/$slug';
     return VellumReleaseInfo(
       currentVersion: package.version,
       latestVersion: tag.replaceFirst(RegExp(r'^[vV]'), ''),
       notes: data['body'] as String? ?? '',
-      releaseUrl: data['html_url'] as String? ?? vellumGitHubRepositoryUrl,
+      releaseUrl: htmlUrl,
       assets: assets,
     );
   }

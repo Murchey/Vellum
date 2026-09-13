@@ -2,6 +2,7 @@
 library;
 
 export 'app.dart';
+export 'pages/cover_editor_sheet.dart';
 export 'pages/ebook_to_txt_page.dart';
 export 'pages/font_manager_sheet.dart';
 export 'pages/library_pages.dart';
@@ -22,6 +23,7 @@ export 'reader/reader_page.dart';
 export 'services/book_importer.dart';
 export 'services/book_import_service.dart';
 export 'services/book_library.dart';
+export 'services/library_models.dart';
 export 'services/vellum_update_service.dart';
 export 'theme/vellum_theme.dart';
 export 'util/text_slices.dart';

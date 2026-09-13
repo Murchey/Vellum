@@ -61,17 +61,21 @@ class BookGridCard extends StatelessWidget {
   final ImportedBook book;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final VoidCallback? onLongPress;
   const BookGridCard({
     required this.book,
     required this.onTap,
     required this.onDelete,
+    this.onLongPress,
     super.key,
   });
 
   @override
   Widget build(BuildContext context) {
     final muted = VellumTheme.mutedOf(context);
-    return Column(
+    return GestureDetector(
+      onLongPress: onLongPress,
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
@@ -159,6 +163,7 @@ class BookGridCard extends StatelessWidget {
           style: TextStyle(color: muted, fontSize: 11),
         ),
       ],
+      ),
     );
   }
 }
@@ -168,30 +173,39 @@ class DefaultCover extends StatelessWidget {
   const DefaultCover({required this.book, super.key});
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topLeft,
-        end: Alignment.bottomRight,
-        colors: [
-          VellumTheme.accentOf(context).withValues(alpha: .88),
-          VellumTheme.accentOf(context).withValues(alpha: .62),
-        ],
+  Widget build(BuildContext context) {
+    final label = (book.coverText?.isNotEmpty ?? false)
+        ? book.coverText!
+        : book.format.name.toUpperCase();
+    final isCustom = book.coverText?.isNotEmpty ?? false;
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            VellumTheme.accentOf(context).withValues(alpha: .88),
+            VellumTheme.accentOf(context).withValues(alpha: .62),
+          ],
+        ),
       ),
-    ),
-    alignment: Alignment.center,
-    padding: const EdgeInsets.all(12),
-    child: Text(
-      book.format.name.toUpperCase(),
-      textAlign: TextAlign.center,
-      style: const TextStyle(
-        color: CupertinoColors.white,
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 1.4,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.all(12),
+      child: Text(
+        label,
+        textAlign: TextAlign.center,
+        maxLines: isCustom ? 6 : 2,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: CupertinoColors.white,
+          fontSize: isCustom ? 14 : 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: isCustom ? 0 : 1.4,
+          height: 1.3,
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class BookRow extends StatelessWidget {

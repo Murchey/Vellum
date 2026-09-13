@@ -39,6 +39,8 @@ Map<String, dynamic> _bookIndexJson(ImportedBook book) => {
   'format': book.format.name,
   'paragraphCount': book.paragraphCount,
   'cover': book.coverBytes == null ? null : base64Encode(book.coverBytes!),
+  'coverText': book.coverText,
+  'folderId': book.folderId,
 };
 
 String _encodeLibraryIndex(List<ImportedBook> books) =>
@@ -56,6 +58,8 @@ ImportedBook _decodeIndexEntry(Map<String, dynamic> data) => ImportedBook(
   coverBytes: data['cover'] == null
       ? null
       : Uint8List.fromList(base64Decode(data['cover'] as String)),
+  coverText: data['coverText'] as String?,
+  folderId: data['folderId'] as String?,
 );
 
 ImportedBook _decodeBookContent(Map<String, dynamic> data) {
@@ -125,10 +129,153 @@ class BookLibrary {
     if (await file.exists()) {
       try {
         final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-        return _decodeBookContent(data);
+        final full = _decodeBookContent(data);
+        // Content files do not carry shelf cover; keep the index shell's cover.
+        return full.copyWith(
+          coverBytes: book.coverBytes,
+          coverText: book.coverText,
+          folderId: book.folderId,
+        );
       } catch (_) {}
     }
     return book;
+  }
+
+  /// Updates only the shelf cover (image and/or text) and rewrites the index.
+  Future<void> updateBookCover(
+    ImportedBook book, {
+    Uint8List? coverBytes,
+    String? coverText,
+    bool clearCoverImage = false,
+    bool clearCoverText = false,
+  }) async {
+    final updated = book.copyWith(
+      coverBytes: coverBytes,
+      coverText: coverText,
+      clearCoverImage: clearCoverImage,
+      clearCoverText: clearCoverText,
+    );
+    final books = await load();
+    final next = <ImportedBook>[
+      for (final item in books)
+        item.storageId == updated.storageId ? updated : item,
+    ];
+    if (!next.any((item) => item.storageId == updated.storageId)) {
+      next.insert(0, updated);
+    }
+    // Rewrite index without loading every book body.
+    await (await _file()).writeAsString(
+      await compute(_encodeLibraryIndex, next),
+      flush: true,
+    );
+  }
+
+  Future<List<LibraryFolder>> loadFolders() async {
+    final file = await _foldersFile();
+    if (!await file.exists()) return const [];
+    try {
+      final raw = jsonDecode(await file.readAsString()) as List<dynamic>;
+      return [
+        for (final entry in raw)
+          LibraryFolder(
+            id: entry['id'] as String,
+            name: entry['name'] as String,
+          ),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<LibraryFolder> createFolder(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      throw const BookImportException('文件夹名称不能为空。');
+    }
+    final folders = await loadFolders();
+    final folder = LibraryFolder(
+      id: 'f_${DateTime.now().microsecondsSinceEpoch}',
+      name: trimmed,
+    );
+    await _writeFolders([...folders, folder]);
+    return folder;
+  }
+
+  Future<void> renameFolder(String id, String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    final folders = await loadFolders();
+    await _writeFolders([
+      for (final folder in folders)
+        if (folder.id == id)
+          LibraryFolder(id: folder.id, name: trimmed)
+        else
+          folder,
+    ]);
+  }
+
+  Future<void> deleteFolder(String id) async {
+    final folders = await loadFolders();
+    await _writeFolders([
+      for (final folder in folders)
+        if (folder.id != id) folder,
+    ]);
+    final books = await load();
+    final next = <ImportedBook>[
+      for (final book in books)
+        if (book.folderId == id) book.copyWith(clearFolder: true) else book,
+    ];
+    await (await _file()).writeAsString(
+      await compute(_encodeLibraryIndex, next),
+      flush: true,
+    );
+  }
+
+  Future<void> setBookFolder(
+    ImportedBook book,
+    String? folderId,
+  ) async {
+    final updated = folderId == null
+        ? book.copyWith(clearFolder: true)
+        : book.copyWith(folderId: folderId);
+    final books = await load();
+    final next = <ImportedBook>[
+      for (final item in books)
+        item.storageId == updated.storageId ? updated : item,
+    ];
+    if (!next.any((item) => item.storageId == updated.storageId)) {
+      next.insert(0, updated);
+    }
+    await (await _file()).writeAsString(
+      await compute(_encodeLibraryIndex, next),
+      flush: true,
+    );
+  }
+
+  Future<void> _writeFolders(List<LibraryFolder> folders) async {
+    await (await _foldersFile()).writeAsString(
+      jsonEncode([
+        for (final folder in folders)
+          {'id': folder.id, 'name': folder.name},
+      ]),
+      flush: true,
+    );
+  }
+
+  /// Empty string means the built-in default update repository.
+  Future<String> loadUpdateRepository() async {
+    final file = await _updateRepoFile();
+    if (!await file.exists()) return '';
+    try {
+      final raw = (await file.readAsString()).trim();
+      return raw;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  Future<void> saveUpdateRepository(String repository) async {
+    await (await _updateRepoFile()).writeAsString(repository.trim(), flush: true);
   }
 
   Future<void> save(List<ImportedBook> books) async {
@@ -308,4 +455,18 @@ class BookLibrary {
   Future<File> _stateFile() async => File(
     '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_reading_state.json',
   );
+
+  Future<File> _foldersFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File(
+      '${dir.path}${Platform.pathSeparator}vellum_folders.json',
+    );
+  }
+
+  Future<File> _updateRepoFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File(
+      '${dir.path}${Platform.pathSeparator}vellum_update_repo.txt',
+    );
+  }
 }

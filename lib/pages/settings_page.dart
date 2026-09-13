@@ -98,24 +98,75 @@ class SettingsPage extends StatefulWidget {
 
 
 class _SettingsPageState extends State<SettingsPage> {
-
   late Future<StorageUsage> _usage;
-
   bool _checkingUpdate = false;
-
-
+  String _updateRepo = '';
+  final _library = const BookLibrary();
 
   @override
-
   void initState() {
-
     super.initState();
-
     _usage = widget.storageUsage();
-
+    _loadUpdateRepo();
   }
 
+  Future<void> _loadUpdateRepo() async {
+    final repo = await _library.loadUpdateRepository();
+    if (mounted) setState(() => _updateRepo = repo);
+  }
 
+  String get _updateRepoLabel {
+    final normalized = normalizeGitHubRepository(_updateRepo);
+    return normalized ?? vellumGitHubRepository;
+  }
+
+  Future<void> _editUpdateRepo() async {
+    final controller = TextEditingController(text: _updateRepo);
+    final next = await showCupertinoDialog<String>(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('更新仓库'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('填写 owner/repo 或 GitHub 仓库地址，留空则使用默认仓库。'),
+            const SizedBox(height: 12),
+            CupertinoTextField(
+              controller: controller,
+              placeholder: vellumGitHubRepository,
+              autofocus: true,
+              maxLines: 2,
+              minLines: 1,
+            ),
+          ],
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(ctx, ''),
+            child: const Text('恢复默认'),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (next == null || !mounted) return;
+    if (next.isNotEmpty && normalizeGitHubRepository(next) == null) {
+      await _showUpdateDialog('格式无效，请填写 owner/repo 或完整 GitHub 地址。');
+      return;
+    }
+    await _library.saveUpdateRepository(next);
+    if (!mounted) return;
+    setState(() => _updateRepo = next);
+  }
 
   void _refresh() => setState(() => _usage = widget.storageUsage());
 
@@ -127,7 +178,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
     try {
 
-      final release = await const VellumUpdateService().check();
+      final release = await const VellumUpdateService().check(
+        repository: _updateRepo,
+      );
 
       if (!mounted) return;
 
@@ -499,12 +552,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   additionalInfo: Text(
 
-                    _checkingUpdate ? '检查中…' : 'niriko-mu/Vellum',
+                    _checkingUpdate ? '检查中…' : _updateRepoLabel,
 
                   ),
 
                   onTap: _checkingUpdate ? null : _checkForUpdate,
 
+                ),
+                CupertinoListTile(
+                  backgroundColor: pageBackground,
+                  backgroundColorActivated: pressedBackground,
+                  leading: const Icon(CupertinoIcons.gear_alt),
+                  title: const Text('更新仓库'),
+                  additionalInfo: const Text('自定义'),
+                  onTap: _editUpdateRepo,
                 ),
 
               ],

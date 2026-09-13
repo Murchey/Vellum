@@ -86,3 +86,10 @@ class StorageUsage {
 
   int get totalBytes => libraryBytes + readingStateBytes + fontBytes;
 }
+
+
+class LibraryFolder {
+  const LibraryFolder({required this.id, required this.name});
+  final String id;
+  final String name;
+}
