@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 
 import 'library_models.dart';
+import 'ttf_name_reader.dart';
 
 /// Font file persistence, independent of book storage.
 class FontStorage {
@@ -56,7 +57,16 @@ class FontStorage {
       if (entity is File && entity.path.endsWith('.ttf')) {
         final name = entity.uri.pathSegments.last.replaceAll('.ttf', '');
         final family = 'Font_${name.hashCode.abs()}';
-        fonts.add(InstalledFont(name: name, family: family));
+        String? displayName;
+        try {
+          final bytes = await entity.readAsBytes();
+          displayName = readTtfDisplayName(Uint8List.fromList(bytes));
+        } catch (_) {
+          displayName = null;
+        }
+        fonts.add(
+          InstalledFont(name: name, family: family, displayName: displayName),
+        );
       }
     }
     return fonts;

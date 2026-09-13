@@ -12,10 +12,21 @@ class FontPreferences {
 }
 
 class InstalledFont {
-  const InstalledFont({required this.name, required this.family});
+  const InstalledFont({
+    required this.name,
+    required this.family,
+    this.displayName,
+  });
 
+  /// File key (without `.ttf`) used to load/delete the font file.
   final String name;
   final String family;
+
+  /// Human-readable name from the font's internal `name` table.
+  /// Falls back to [name] (filename) when unavailable.
+  final String? displayName;
+
+  String get label => (displayName?.isNotEmpty ?? false) ? displayName! : name;
 }
 
 class ReadingState {

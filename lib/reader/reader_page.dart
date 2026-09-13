@@ -259,17 +259,20 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
   }
-  // Bottom chrome overlays the page; only the status line is reserved in the
-  // reading viewport so text does not leave a large empty strip at the bottom.
-  static const double _readerBottomInset = 28;
+  /// Bottom padding for the reading surface. Always reserve enough room for
+  /// the status line so the last body line stays inside the viewport even
+  /// when the control bar is collapsed.
+  double get _readerBottomInset => _showControls
+      ? kReaderBottomChromeHeight + 8
+      : 48;
 
+  /// Viewport height for pagination. Uses the same bottom reservation as the
+  /// page/scroll padding so a page never lays out more text than can fit.
   double _pageAvailableHeight(BuildContext context) {
-    final media = MediaQuery.of(context);
-    return media.size.height -
-        media.padding.top -
-        media.padding.bottom -
-        12 -
-        _readerBottomInset;
+    final size = MediaQuery.sizeOf(context);
+    final view = MediaQuery.viewPaddingOf(context);
+    final bottom = _readerBottomInset;
+    return size.height - view.top - view.bottom - 20 - bottom;
   }
 
   double _pageContentWidth(BuildContext context) {

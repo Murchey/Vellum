@@ -153,7 +153,7 @@ class ReaderFontPickerSheet extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                font.name,
+                font.label,
                 style: TextStyle(color: VellumTheme.inkOf(context)),
               ),
               const SizedBox(height: 6),

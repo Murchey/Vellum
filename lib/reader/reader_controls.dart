@@ -64,6 +64,9 @@ class ReaderBottomControls extends StatefulWidget {
   State<ReaderBottomControls> createState() => _ReaderBottomControlsState();
 }
 
+/// Seek row + divider + function bar + top border.
+const double kReaderBottomChromeHeight = 4 + 56 + 1 + 56 + 1;
+
 class _ReaderBottomControlsState extends State<ReaderBottomControls> {
   ReaderControlPanel? _openPanel;
   double? _dragProgress;
@@ -116,7 +119,7 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
 
   /// Seek row + divider + function bar + top border.
   /// Keep in sync with ReaderPage `_readerBottomInset`.
-  static const double chromeHeight = 4 + 56 + 1 + 56 + 1;
+  static const double kReaderBottomChromeHeight = 4 + 56 + 1 + 56 + 1;
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +129,7 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
         final available = constraints.maxHeight.isFinite
             ? constraints.maxHeight
             : MediaQuery.sizeOf(context).height * .58;
-        final panelMax = (available - chromeHeight).clamp(0.0, available);
+        final panelMax = (available - kReaderBottomChromeHeight).clamp(0.0, available);
         return ClipRect(
           child: MediaQuery.withClampedTextScaling(
             minScaleFactor: 1,
