@@ -23,11 +23,20 @@ abstract final class VellumTheme {
     scaffoldBackgroundColor: paper,
     barBackgroundColor: paper,
     textTheme: CupertinoTextThemeData(
-      textStyle: TextStyle(color: ink, fontFamily: 'Georgia'),
+      textStyle: TextStyle(inherit: false, color: ink, fontFamily: 'Georgia'),
       navTitleTextStyle: TextStyle(
+        inherit: false,
         color: ink,
         fontSize: 17,
         fontWeight: FontWeight.w600,
+        fontFamily: 'Georgia',
+      ),
+      navLargeTitleTextStyle: TextStyle(
+        inherit: false,
+        color: ink,
+        fontSize: 34,
+        fontWeight: FontWeight.w700,
+        fontFamily: 'Georgia',
       ),
     ),
   );
@@ -38,11 +47,24 @@ abstract final class VellumTheme {
     scaffoldBackgroundColor: darkPaper,
     barBackgroundColor: darkPaper,
     textTheme: CupertinoTextThemeData(
-      textStyle: TextStyle(color: darkInk, fontFamily: 'Georgia'),
+      textStyle: TextStyle(
+        inherit: false,
+        color: darkInk,
+        fontFamily: 'Georgia',
+      ),
       navTitleTextStyle: TextStyle(
+        inherit: false,
         color: darkInk,
         fontSize: 17,
         fontWeight: FontWeight.w600,
+        fontFamily: 'Georgia',
+      ),
+      navLargeTitleTextStyle: TextStyle(
+        inherit: false,
+        color: darkInk,
+        fontSize: 34,
+        fontWeight: FontWeight.w700,
+        fontFamily: 'Georgia',
       ),
     ),
   );
@@ -56,6 +78,9 @@ abstract final class VellumTheme {
       textTheme: CupertinoTextThemeData(
         textStyle: base.textTheme.textStyle.copyWith(fontFamily: fontFamily),
         navTitleTextStyle: base.textTheme.navTitleTextStyle.copyWith(
+          fontFamily: fontFamily,
+        ),
+        navLargeTitleTextStyle: base.textTheme.navLargeTitleTextStyle.copyWith(
           fontFamily: fontFamily,
         ),
       ),

@@ -384,7 +384,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
       navigationBar: const CupertinoNavigationBar(middle: Text('设置')),
 
-      child: SafeArea(
+      child: MediaQuery.withClampedTextScaling(
+
+        minScaleFactor: 1,
+
+        maxScaleFactor: 1.2,
+
+        child: SafeArea(
 
         child: ListView(
 
@@ -444,7 +450,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   title: const Text('导入字体'),
 
-                  additionalInfo: Text('已导入 ${widget.installedFonts.length} 个'),
+                  additionalInfo: Text(
+                    '${widget.installedFonts.length}',
+                  ),
 
                   onTap: widget.onImportFonts,
 
@@ -662,11 +670,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
       ),
 
+      ),
+
     );
 
   }
-
-
 
   void _showFontManager(BuildContext context) {
 

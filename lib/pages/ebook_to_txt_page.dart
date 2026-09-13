@@ -44,6 +44,7 @@ class _EbookToTxtPageState extends State<EbookToTxtPage> {
       _errorMessage = null;
       _savedPath = null;
       _sourceName = null;
+      _paragraphCount = 0;
     });
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -147,7 +148,9 @@ class _EbookToTxtPageState extends State<EbookToTxtPage> {
           dialogTitle: '选择导出文件夹',
         );
         if (directory == null || directory.isEmpty) return null;
-        final file = File('$directory${Platform.pathSeparator}$suggestedName');
+        final file = File(
+          '$directory${Platform.pathSeparator}$suggestedName',
+        );
         await file.writeAsString(text, encoding: utf8, flush: true);
         return file.path;
       } catch (_) {
@@ -174,155 +177,185 @@ class _EbookToTxtPageState extends State<EbookToTxtPage> {
     final accent = VellumTheme.accentOf(context);
 
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(
-        middle: Text('转为 TXT'),
-      ),
+      navigationBar: const CupertinoNavigationBar(middle: Text('转为 TXT')),
       backgroundColor: CupertinoTheme.of(context).scaffoldBackgroundColor,
-      child: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: VellumTheme.softAccentOf(context),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                CupertinoIcons.doc_text,
-                size: 34,
-                color: accent,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              '电子书转纯文本',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontFamily: VellumTheme.fontFamily,
-                fontSize: 24,
-                fontWeight: FontWeight.w600,
-                color: ink,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '将 EPUB 或 MOBI 导出为 UTF-8 TXT。\n可自由选择保存位置，适合备份或传到其他阅读器。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: muted, height: 1.45, fontSize: 14),
-            ),
-            const SizedBox(height: 22),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: VellumTheme.cardOf(context),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: VellumTheme.lineOf(context)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
+      // Avoid large system font sizes stretching chrome labels off-screen.
+      child: MediaQuery.withClampedTextScaling(
+        minScaleFactor: 1,
+        maxScaleFactor: 1.35,
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (_phase == _ConvertPhase.idle) ...[
-                      Text(
-                        '选择一本电子书开始转换',
-                        style: TextStyle(
-                          color: ink,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+                    const SizedBox(height: 4),
+                    Container(
+                      width: 72,
+                      height: 72,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: VellumTheme.softAccentOf(context),
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        '支持 .epub / .mobi，加密 DRM 文件无法转换。',
-                        style: TextStyle(color: muted, fontSize: 13),
+                      child: Icon(
+                        CupertinoIcons.doc_text,
+                        size: 32,
+                        color: accent,
                       ),
-                    ] else ...[
-                      Row(
-                        children: [
-                          if (_busy)
-                            const CupertinoActivityIndicator(radius: 10)
-                          else if (_phase == _ConvertPhase.done)
-                            Icon(
-                              CupertinoIcons.checkmark_circle_fill,
-                              color: accent,
-                              size: 20,
-                            )
-                          else
-                            Icon(
-                              CupertinoIcons.exclamationmark_circle_fill,
-                              color: CupertinoColors.systemRed,
-                              size: 20,
-                            ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _status,
-                              style: TextStyle(
-                                color: ink,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      '电子书转纯文本',
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontFamily: VellumTheme.fontFamily,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w600,
+                        color: ink,
+                        height: 1.25,
                       ),
-                      if (_sourceName != null) ...[
-                        const SizedBox(height: 12),
-                        _InfoRow(label: '源文件', value: _sourceName!),
-                      ],
-                      if (_paragraphCount > 0) ...[
-                        const SizedBox(height: 8),
-                        _InfoRow(
-                          label: '段落',
-                          value: '$_paragraphCount 段',
-                        ),
-                      ],
-                      if (_savedPath != null) ...[
-                        const SizedBox(height: 8),
-                        _InfoRow(label: '保存到', value: _savedPath!),
-                      ],
-                      if (_errorMessage != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _errorMessage!,
-                          style: TextStyle(
-                            color: CupertinoColors.systemRed,
-                            fontSize: 13,
-                            height: 1.4,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '将 EPUB 或 MOBI 导出为 UTF-8 TXT。\n可选择保存位置，适合备份或传到其他阅读器。',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: muted, height: 1.4, fontSize: 13),
+                    ),
+                    const SizedBox(height: 18),
+                    DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: VellumTheme.cardOf(context),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: VellumTheme.lineOf(context)),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: _statusCard(ink, muted, accent),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: CupertinoButton.filled(
+                        borderRadius: BorderRadius.circular(14),
+                        onPressed: _busy ? null : _startConvert,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            _busy
+                                ? '处理中…'
+                                : _phase == _ConvertPhase.done ||
+                                      _phase == _ConvertPhase.failed
+                                ? '再转一本'
+                                : '选择电子书',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                      ],
-                    ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      '转换在本机完成，不会上传文件。',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: muted, fontSize: 12),
+                    ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            CupertinoButton.filled(
-              borderRadius: BorderRadius.circular(14),
-              onPressed: _busy ? null : _startConvert,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(
-                  _busy
-                      ? '处理中…'
-                      : _phase == _ConvertPhase.done || _phase == _ConvertPhase.failed
-                      ? '再转一本'
-                      : '选择电子书',
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statusCard(Color ink, Color muted, Color accent) {
+    if (_phase == _ConvertPhase.idle) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '选择一本电子书开始转换',
+            style: TextStyle(
+              color: ink,
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '支持 .epub / .mobi，加密 DRM 文件无法转换。',
+            style: TextStyle(color: muted, fontSize: 13),
+          ),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (_busy)
+              const CupertinoActivityIndicator(radius: 10)
+            else if (_phase == _ConvertPhase.done)
+              Icon(
+                CupertinoIcons.checkmark_circle_fill,
+                color: accent,
+                size: 20,
+              )
+            else
+              Icon(
+                CupertinoIcons.exclamationmark_circle_fill,
+                color: CupertinoColors.systemRed,
+                size: 20,
+              ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _status,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: ink,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            Text(
-              '转换在本机完成，不会上传文件。',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: muted, fontSize: 12),
-            ),
           ],
         ),
-      ),
+        if (_sourceName != null) ...[
+          const SizedBox(height: 10),
+          _InfoRow(label: '源文件', value: _sourceName!),
+        ],
+        if (_paragraphCount > 0) ...[
+          const SizedBox(height: 6),
+          _InfoRow(label: '段落', value: '$_paragraphCount 段'),
+        ],
+        if (_savedPath != null) ...[
+          const SizedBox(height: 6),
+          _InfoRow(label: '保存到', value: _savedPath!),
+        ],
+        if (_errorMessage != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            _errorMessage!,
+            maxLines: 6,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: CupertinoColors.systemRed,
+              fontSize: 12,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -341,15 +374,20 @@ class _InfoRow extends StatelessWidget {
         width: 52,
         child: Text(
           label,
-          style: TextStyle(color: VellumTheme.mutedOf(context), fontSize: 13),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: VellumTheme.mutedOf(context), fontSize: 12),
         ),
       ),
+      const SizedBox(width: 8),
       Expanded(
         child: Text(
           value,
+          maxLines: 3,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: VellumTheme.inkOf(context),
-            fontSize: 13,
+            fontSize: 12,
             height: 1.35,
           ),
         ),
