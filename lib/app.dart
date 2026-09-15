@@ -21,7 +21,7 @@ import 'pages/library_pages.dart';
 
 import 'pages/settings_page.dart';
 
-import 'pages/writing_placeholder.dart';
+import 'pages/writing_page.dart';
 
 import 'reader/reader_page.dart';
 
@@ -465,9 +465,14 @@ class _LibraryShellState extends State<LibraryShell> {
     ReadingState? continueState;
 
     if (books.isNotEmpty) {
-
-      continueState = await _library.loadReadingState(books.first);
-
+      for (final book in books) {
+        final state = await _library.loadReadingState(book);
+        if (state.paragraphIndex > 0 || state.page > 0 || state.position > 0) {
+          continueState = state;
+          break;
+        }
+      }
+      continueState ??= await _library.loadReadingState(books.first);
     }
 
     if (!mounted) return;
@@ -884,7 +889,7 @@ class _LibraryShellState extends State<LibraryShell> {
 
             }
 
-            if (index == 2) return const WritingPlaceholder();
+            if (index == 2) return const WritingPage();
 
             return SettingsPage(
 

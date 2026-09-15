@@ -24,6 +24,7 @@ class ReaderParagraph extends StatelessWidget {
     this.showImage = true,
     this.showLinkAction = true,
     this.indentFirstLine = true,
+    this.selectable = true,
     this.onJumpToParagraph,
     super.key,
   });
@@ -40,6 +41,9 @@ class ReaderParagraph extends StatelessWidget {
   final bool showImage;
   final bool showLinkAction;
   final bool indentFirstLine;
+
+  /// Cover-turn animation only needs a visual snapshot — skip SelectableText.
+  final bool selectable;
   final ValueChanged<int>? onJumpToParagraph;
 
   @override
@@ -115,12 +119,16 @@ class ReaderParagraph extends StatelessWidget {
         ? (plain.trim().length <= 28 ? TextAlign.center : TextAlign.start)
         : isCenter
         ? TextAlign.center
-        : TextAlign.start;
-    final text = SelectableText.rich(
-      TextSpan(style: textStyle, children: spans),
-      contextMenuBuilder: contextMenuBuilder,
-      textAlign: alignment,
-    );
+        // Body text is justified so the right edge stays even.
+        : TextAlign.justify;
+    final span = TextSpan(style: textStyle, children: spans);
+    final text = selectable
+        ? SelectableText.rich(
+            span,
+            contextMenuBuilder: contextMenuBuilder,
+            textAlign: alignment,
+          )
+        : Text.rich(span, textAlign: alignment);
     final formattedText = isQuote
         ? Container(
             padding: const EdgeInsets.only(left: 14),

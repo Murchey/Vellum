@@ -21,10 +21,23 @@ class HomePage extends StatelessWidget {
 
   double get _continueProgress {
     final state = continueState;
-    if (state == null || books.isEmpty) return 0;
-    final total = books.first.paragraphCount;
+    final book = continueBook;
+    if (state == null || book == null) return 0;
+    final total = book.paragraphCount;
     if (total <= 1) return 0;
     return (state.paragraphIndex / (total - 1)).clamp(0.0, 1.0);
+  }
+
+  /// Prefer the book that owns [continueState]; fall back to the newest.
+  ImportedBook? get continueBook {
+    if (books.isEmpty) return null;
+    final state = continueState;
+    if (state != null && state.bookId.isNotEmpty) {
+      for (final book in books) {
+        if (book.storageId == state.bookId) return book;
+      }
+    }
+    return books.first;
   }
 
   @override
@@ -67,9 +80,9 @@ class HomePage extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   _ContinueCard(
-                    book: books.first,
+                    book: continueBook!,
                     progress: _continueProgress,
-                    onTap: () => onOpen(books.first),
+                    onTap: () => onOpen(continueBook!),
                   ),
                   if (books.length > 1) ...[
                     const SizedBox(height: 28),
@@ -107,9 +120,14 @@ class HomePage extends StatelessWidget {
                                 indent: 74,
                                 color: VellumTheme.lineOf(context),
                               ),
-                            BookRow(
-                              book: books[i],
-                              onTap: () => onOpen(books[i]),
+                            Builder(
+                              builder: (context) {
+                                final book = books[i];
+                                return BookRow(
+                                  book: book,
+                                  onTap: () => onOpen(book),
+                                );
+                              },
                             ),
                           ],
                         ],

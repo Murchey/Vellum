@@ -4,7 +4,28 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d06d7fbd-f527-471e-9b91-d12b0b4e9b10" name="Changes" comment="" />
+    <list default="true" id="d06d7fbd-f527-471e-9b91-d12b0b4e9b10" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/app.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/pages/home_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/home_page.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/pages/settings_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/settings_page.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/pages/writing_placeholder.dart" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_chrome.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_chrome.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_models.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_models.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_page.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_paragraph.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_paragraph.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_toc.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_toc.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/book_library.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/book_library.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/book_models.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/book_models.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/epub_decoder.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/epub_decoder.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/library_models.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/library_models.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/mobi_decoder.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/mobi_decoder.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/vellum_update_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/vellum_update_service.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/vellum.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/vellum.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/book_importer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/book_importer_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/widget_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/widget_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/vellum.iml" beforeDir="false" afterPath="$PROJECT_DIR$/vellum.iml" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

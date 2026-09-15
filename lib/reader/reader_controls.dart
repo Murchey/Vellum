@@ -37,6 +37,7 @@ class ReaderBottomControls extends StatefulWidget {
     required this.onReadingMode,
     this.pageTurnStyle = PageTurnStyle.cover,
     required this.onPageTurnStyle,
+    this.readingTimeLabel,
     super.key,
   });
 
@@ -63,6 +64,7 @@ class ReaderBottomControls extends StatefulWidget {
   final ValueChanged<ReadingMode> onReadingMode;
   final PageTurnStyle pageTurnStyle;
   final ValueChanged<PageTurnStyle> onPageTurnStyle;
+  final String? readingTimeLabel;
 
   @override
   State<ReaderBottomControls> createState() => _ReaderBottomControlsState();
@@ -183,6 +185,7 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                               background: widget.background,
                               readingMode: widget.readingMode,
                               pageTurnStyle: widget.pageTurnStyle,
+                              readingTimeLabel: widget.readingTimeLabel,
                               onFontSize: widget.onFontSize,
                               onReaderFontWeight: widget.onReaderFontWeight,
                               onLineSpacing: widget.onLineSpacing,

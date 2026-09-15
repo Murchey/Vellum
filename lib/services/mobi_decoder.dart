@@ -229,6 +229,15 @@ class MobiDecoder {
         final closing = marked.indexOf('>', offset);
         offset = closing < 0 ? marked.length : closing + 1;
       }
+      // Never split a character entity in half.
+      final entityStart = marked.lastIndexOf('&', offset);
+      final entityEnd = marked.indexOf(';', offset);
+      if (entityStart >= 0 &&
+          entityStart < offset &&
+          entityEnd >= 0 &&
+          entityEnd - entityStart < 12) {
+        offset = entityEnd + 1;
+      }
       marked = marked.replaceRange(offset, offset, '[[vellum-filepos:$index]]');
     }
 
@@ -243,18 +252,43 @@ class MobiDecoder {
       }
     }
 
-    return [
-      for (var index = 0; index < matches.length; index++)
-        BookTocEntry(
-          title: pipeline
-              .htmlToText(matches[index].group(2)!)
-              .trim(),
-          paragraphIndex: (positions[index] ?? 0).clamp(
-            0,
-            paragraphs.length - 1,
-          ),
-        ),
-    ].where((entry) => entry.title.isNotEmpty).toList();
+    // Fill missing hits from the nearest previous known paragraph so a single
+    // lost marker does not collapse a chapter onto paragraph 0.
+    final resolved = List<int>.filled(matches.length, -1);
+    var last = -1;
+    for (var index = 0; index < matches.length; index++) {
+      final hit = positions[index];
+      if (hit != null) {
+        last = hit;
+        resolved[index] = hit;
+      } else {
+        resolved[index] = last;
+      }
+    }
+    var next = paragraphs.length - 1;
+    for (var index = matches.length - 1; index >= 0; index--) {
+      if (positions[index] != null) {
+        next = positions[index]!;
+      } else if (resolved[index] < 0) {
+        resolved[index] = next;
+      }
+    }
+
+    final entries = <BookTocEntry>[];
+    final seen = <int>{};
+    for (var index = 0; index < matches.length; index++) {
+      final title = pipeline
+          .htmlToText(matches[index].group(2)!)
+          .replaceAll(RegExp(r'\s+'), ' ')
+          .trim();
+      if (title.isEmpty) continue;
+      final paragraphIndex = resolved[index].clamp(0, paragraphs.length - 1);
+      if (!seen.add(paragraphIndex)) continue;
+      entries.add(
+        BookTocEntry(title: title, paragraphIndex: paragraphIndex),
+      );
+    }
+    return entries;
   }
 
   List<int> utf8OffsetsToStringOffsets(

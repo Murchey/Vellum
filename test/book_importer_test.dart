@@ -54,6 +54,112 @@ void main() {
     expect(book.linkTargets[0], 1);
   });
 
+  test('parses EPUB NCX table of contents and maps jump targets', () {
+    final archive = Archive()
+      ..addFile(
+        ArchiveFile.string(
+          'META-INF/container.xml',
+          '<container><rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'OPS/book.opf',
+          '<package>'
+          '<metadata><dc:title>目录书</dc:title></metadata>'
+          '<manifest>'
+          '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+          '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+          '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>'
+          '</manifest>'
+          '<spine toc="ncx">'
+          '<itemref idref="c1"/><itemref idref="c2"/>'
+          '</spine>'
+          '</package>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'OPS/toc.ncx',
+          '<ncx><navMap>'
+          '<navPoint><navLabel><text>第一章</text></navLabel>'
+          '<content src="c1.xhtml#s1"/></navPoint>'
+          '<navPoint><navLabel><text>第二章</text></navLabel>'
+          '<content src="c2.xhtml"/></navPoint>'
+          '</navMap></ncx>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'OPS/c1.xhtml',
+          '<html><body><p>封面段</p><h1 id="s1">第一章</h1><p>正文一</p></body></html>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'OPS/c2.xhtml',
+          '<html><body><h1>第二章</h1><p>正文二</p></body></html>',
+        ),
+      );
+
+    final book = importer.decode(
+      filename: 'toc.epub',
+      bytes: Uint8List.fromList(ZipEncoder().encodeBytes(archive)),
+    );
+
+    expect(book.tocEntries, hasLength(2));
+    expect(book.tocEntries[0].title, '第一章');
+    expect(book.tocEntries[0].paragraphIndex, 1);
+    expect(book.tocEntries[1].title, '第二章');
+    expect(book.tocEntries[1].paragraphIndex, 3);
+  });
+
+  test('parses EPUB3 nav table of contents', () {
+    final archive = Archive()
+      ..addFile(
+        ArchiveFile.string(
+          'META-INF/container.xml',
+          '<container><rootfiles><rootfile full-path="EPUB/package.opf"/></rootfiles></container>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'EPUB/package.opf',
+          '<package>'
+          '<metadata><dc:title>Nav 书</dc:title></metadata>'
+          '<manifest>'
+          '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+          '<item id="body" href="body.xhtml" media-type="application/xhtml+xml"/>'
+          '</manifest>'
+          '<spine><itemref idref="body"/></spine>'
+          '</package>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'EPUB/nav.xhtml',
+          '<html><body><nav epub:type="toc"><ol>'
+          '<li><a href="body.xhtml#start">开篇</a></li>'
+          '</ol></nav></body></html>',
+        ),
+      )
+      ..addFile(
+        ArchiveFile.string(
+          'EPUB/body.xhtml',
+          '<html><body><p>前言</p><h1 id="start">开篇</h1><p>内容</p></body></html>',
+        ),
+      );
+
+    final book = importer.decode(
+      filename: 'nav.epub',
+      bytes: Uint8List.fromList(ZipEncoder().encodeBytes(archive)),
+    );
+
+    expect(book.tocEntries, hasLength(1));
+    expect(book.tocEntries[0].title, '开篇');
+    expect(book.tocEntries[0].paragraphIndex, 1);
+  });
+
   test('rejects unsupported extensions without pretending to import', () {
     expect(
       () => importer.decode(

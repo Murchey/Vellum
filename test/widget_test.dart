@@ -86,8 +86,13 @@ void main() {
   testWidgets('shows storage management in the settings tab', (tester) async {
     await tester.pumpWidget(const VellumApp());
     await tester.tap(find.text('设置').last);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
+    expect(find.text('阅读统计'), findsOneWidget);
+    expect(find.text('今日阅读'), findsOneWidget);
+
+    await tester.scrollUntilVisible(find.text('存储管理'), 200);
     expect(find.text('存储管理'), findsOneWidget);
     expect(find.text('占用空间'), findsOneWidget);
     expect(find.text('清空书库'), findsOneWidget);
@@ -565,5 +570,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(pageView.controller?.page?.round(), 1);
+  });
+
+  testWidgets('none page-turn style jumps without a residual bounce', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      CupertinoApp(
+        home: ReaderPage(
+          initialState: const ReadingState(mode: 'page', pageTurn: 'none'),
+          book: ImportedBook(
+            title: '无动画翻页',
+            format: BookFormat.txt,
+            paragraphs: List<String>.generate(
+              9,
+              (index) => '第 ${index + 1} 段翻页内容',
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    expect(pageView.physics, isA<SnapPageScrollPhysics>());
+
+    await tester.tapAt(const Offset(700, 300));
+    // One frame is enough: jump is immediate, no spring frames in between.
+    await tester.pump();
+
+    expect(pageView.controller?.page, moreOrLessEquals(1.0, epsilon: 0.01));
+    expect(pageView.controller!.position.isScrollingNotifier.value, isFalse);
   });
 }

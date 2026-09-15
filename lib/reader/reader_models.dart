@@ -2,6 +2,40 @@ import 'package:flutter/cupertino.dart';
 
 enum ReadingMode { scroll, page }
 
+/// PagePhysics that settles on a page without a visible overscroll bounce.
+///
+/// Default [PageScrollPhysics] uses a soft spring that overshoots, which
+/// reads as an unexpected rebound when the user chose "无动画".
+class SnapPageScrollPhysics extends PageScrollPhysics {
+  const SnapPageScrollPhysics({super.parent});
+
+  @override
+  SpringDescription get spring => SpringDescription.withDampingRatio(
+    mass: 0.5,
+    stiffness: 800.0,
+    ratio: 1.0,
+  );
+
+  @override
+  Simulation? createBallisticSimulation(
+    ScrollMetrics position,
+    double velocity,
+  ) {
+    final page = position is PageMetrics ? position.page : null;
+    if (page == null) {
+      return super.createBallisticSimulation(position, velocity);
+    }
+    final targetPixels = page.roundToDouble() * position.viewportDimension;
+    // Already on a page boundary and nearly at rest: do not start a spring.
+    final tolerance = toleranceFor(position);
+    if (velocity.abs() < tolerance.velocity &&
+        (position.pixels - targetPixels).abs() < 0.5) {
+      return null;
+    }
+    return super.createBallisticSimulation(position, velocity);
+  }
+}
+
 enum PageTurnStyle {
   cover('覆盖'),
   none('无动画');

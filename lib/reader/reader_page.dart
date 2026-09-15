@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/book_importer.dart';
 import '../services/book_library.dart';
+import '../services/reading_stats.dart';
 import '../theme/vellum_theme.dart';
 import 'reader_chrome.dart';
 import 'reader_controls.dart';
@@ -72,6 +75,13 @@ class _ReaderPageState extends State<ReaderPage>
   bool _scrollPositionRestored = false;
   bool _pagePositionRestored = false;
   int _scrollRestoreAttempts = 0;
+
+  final _statsService = const ReadingStatsService();
+  final _sessionSeconds = ValueNotifier<int>(0);
+  final _todaySeconds = ValueNotifier<int>(0);
+  Stopwatch? _readStopwatch;
+  Timer? _readTimer;
+  int _unflushedReadSeconds = 0;
   @override
   void initState() {
     super.initState();
@@ -95,9 +105,7 @@ class _ReaderPageState extends State<ReaderPage>
     _coverAnim = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 320),
-    )..addListener(() {
-      if (mounted) setState(() {});
-    });
+    );
     _scrollController = ScrollController()
       ..addListener(() {
         _scheduleSave();
@@ -115,6 +123,70 @@ class _ReaderPageState extends State<ReaderPage>
       });
     _pageController = PageController()..addListener(_scheduleSave);
     _loadBatteryLevel();
+    _startReadingTimer();
+    _loadTodayReading();
+  }
+
+  String get _bookId => widget.book.storageId;
+
+  Future<void> _loadTodayReading() async {
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+    try {
+      final stats = await _statsService.load()
+          .timeout(const Duration(seconds: 2));
+      if (mounted) _todaySeconds.value = stats.todaySeconds;
+    } catch (_) {}
+  }
+
+  void _startReadingTimer() {
+    // Flutter tests set FLUTTER_TEST; a periodic timer would keep
+    // pumpAndSettle busy forever.
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+    _readStopwatch ??= Stopwatch()..start();
+    if (!_readStopwatch!.isRunning) _readStopwatch!.start();
+    _readTimer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+      final watch = _readStopwatch;
+      if (watch == null || !watch.isRunning) return;
+      final elapsed = watch.elapsed.inSeconds;
+      if (elapsed > _sessionSeconds.value) {
+        _unflushedReadSeconds += elapsed - _sessionSeconds.value;
+        _sessionSeconds.value = elapsed;
+      }
+      // Persist often enough that killing the app still keeps most time.
+      if (_unflushedReadSeconds >= 10) {
+        _flushReadingTime();
+      }
+    });
+  }
+
+  void _pauseReadingTimer() {
+    _readStopwatch?.stop();
+    _flushReadingTime();
+  }
+
+  void _flushReadingTime() {
+    final seconds = _unflushedReadSeconds;
+    if (seconds <= 0) return;
+    _unflushedReadSeconds = 0;
+    _statsService.addSeconds(bookId: _bookId, seconds: seconds).then((stats) {
+      if (mounted) _todaySeconds.value = stats.todaySeconds;
+    });
+  }
+
+  String get _sessionLabel {
+    final session = _sessionSeconds.value;
+    final today = _todaySeconds.value + _unflushedReadSeconds;
+    final sessionText = _shortDuration(session);
+    final todayText = _shortDuration(today);
+    return '今日 $todayText · 本次 $sessionText';
+  }
+
+  String _shortDuration(int seconds) {
+    final value = seconds < 0 ? 0 : seconds;
+    if (value < 60) return '${value}s';
+    final minutes = value ~/ 60;
+    if (minutes < 60) return '$minutes 分';
+    return '${minutes ~/ 60} 时 ${minutes % 60} 分';
   }
 
   void _restoreScrollPositionWhenReady() {
@@ -171,9 +243,14 @@ class _ReaderPageState extends State<ReaderPage>
 
   @override
   Future<void> didChangeAppLifecycleState(AppLifecycleState state) async {
+    if (state == AppLifecycleState.resumed) {
+      _startReadingTimer();
+      return;
+    }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
+      _pauseReadingTimer();
       _saveTimer?.cancel();
       await _saveState();
     }
@@ -182,6 +259,9 @@ class _ReaderPageState extends State<ReaderPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _readTimer?.cancel();
+    _readStopwatch?.stop();
+    _flushReadingTime();
     _saveTimer?.cancel();
     _bookmarkNoticeTimer?.cancel();
     _saveState();
@@ -286,6 +366,7 @@ class _ReaderPageState extends State<ReaderPage>
       paragraphIndex: paragraphIndex,
       bookmarks: List<int>.unmodifiable(_bookmarks),
       pageTurn: _pageTurnStyle.name,
+      bookId: _bookId,
     );
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
@@ -402,12 +483,19 @@ class _ReaderPageState extends State<ReaderPage>
       if (_currentPage != 0 || _requestedPage != 0) return;
       final live = _pageController.page;
       if (live == null || live != 0) return;
-      _pageController.jumpToPage(target);
+      _jumpToPageExact(target);
       setState(() {
         _currentPage = target;
         _requestedPage = target;
       });
     });
+  }
+
+  /// Jump to [page]. [SnapPageScrollPhysics] suppresses any residual spring
+  /// that [PageController.jumpToPage] would otherwise start via `goBallistic`.
+  void _jumpToPageExact(int page) {
+    if (!_pageController.hasClients) return;
+    _pageController.jumpToPage(page);
   }
 
   int get _activeParagraph => _readingMode == ReadingMode.page
@@ -446,13 +534,13 @@ class _ReaderPageState extends State<ReaderPage>
       if (_pageCount <= 1) return 0;
       return (_currentPage / (_pageCount - 1)).clamp(0.0, 1.0);
     }
-    if (!_scrollController.hasClients ||
-        _scrollController.position.maxScrollExtent <= 0) {
-      return 0;
-    }
-    final raw =
-        _scrollController.offset /
-        _scrollController.position.maxScrollExtent;
+    if (!_scrollController.hasClients) return 0;
+    final position = _scrollController.position;
+    // Dimensions may not be applied yet on the first frames.
+    if (!position.hasPixels || !position.haveDimensions) return 0;
+    final max = position.maxScrollExtent;
+    if (max <= 0) return 0;
+    final raw = _scrollController.offset / max;
     if (raw <= 0.002) return 0.0;
     if (raw >= 0.998) return 1.0;
     return raw.clamp(0.0, 1.0);
@@ -460,8 +548,11 @@ class _ReaderPageState extends State<ReaderPage>
 
   bool get _canSeekProgress {
     if (_readingMode == ReadingMode.page) return _pageCount > 1;
-    return _scrollController.hasClients &&
-        _scrollController.position.maxScrollExtent > 0;
+    if (!_scrollController.hasClients) return false;
+    final position = _scrollController.position;
+    return position.hasPixels &&
+        position.haveDimensions &&
+        position.maxScrollExtent > 0;
   }
 
   void _jumpToProgress(double value) {
@@ -474,7 +565,7 @@ class _ReaderPageState extends State<ReaderPage>
         _requestedPage = page;
       });
       if (_pageController.hasClients) {
-        _pageController.jumpToPage(page);
+        _jumpToPageExact(page);
       }
       _scheduleSave();
       return;
@@ -811,7 +902,7 @@ bool _isScrollIdle() => true;
                             return PageView.builder(
                               controller: _pageController,
                               scrollDirection: Axis.horizontal,
-                              physics: const PageScrollPhysics(),
+                              physics: const SnapPageScrollPhysics(),
                               allowImplicitScrolling: true,
                               itemCount: _pageCount,
                               onPageChanged: (index) {
@@ -842,9 +933,13 @@ bool _isScrollIdle() => true;
             if (_pullDownDistance > 8) _bookmarkPullIndicator(context),
             if (_coverFromPage != null) _coverTurnOverlay(context),
             if (!_showControls)
-              ReaderStatusBar(
-                progressLabel: _pageProgress,
-                batteryLabel: _batteryText,
+              ListenableBuilder(
+                listenable: Listenable.merge([_sessionSeconds, _todaySeconds]),
+                builder: (context, _) => ReaderStatusBar(
+                  progressLabel: _pageProgress,
+                  batteryLabel: _batteryText,
+                  sessionLabel: _sessionLabel,
+                ),
               ),
             if (_showControls)
               ReaderHeaderPanel(
@@ -922,6 +1017,7 @@ bool _isScrollIdle() => true;
                       progress: _progress,
                       canSeek: _canSeekProgress,
                       currentParagraph: _activeParagraph,
+                      readingTimeLabel: _sessionLabel,
                       chapters: _chapterEntries(),
                       chapterStartPages: _chapterStartPages(),
                       bookmarks: [
@@ -978,7 +1074,7 @@ bool _isScrollIdle() => true;
     );
   }
 
-  Widget _readingPage(BuildContext context, int pageIndex) {
+  Widget _readingPage(BuildContext context, int pageIndex, {bool selectable = true}) {
     if (_pages.isEmpty) return const SizedBox.shrink();
     final page = pageIndex.clamp(0, _pages.length - 1);
     final fragments = _pages[page];
@@ -1023,8 +1119,10 @@ bool _isScrollIdle() => true;
                           ),
                           contextMenuBuilder: buildReaderSelectionToolbar,
                           showImage: fragments[index].showImage,
-                          showLinkAction: fragments[index].showLinkAction,
+                          showLinkAction:
+                              selectable && fragments[index].showLinkAction,
                           indentFirstLine: fragments[index].indentFirstLine,
+                          selectable: selectable,
                           onJumpToParagraph: _jumpToParagraph,
                         ),
                       ),
@@ -1092,7 +1190,7 @@ bool _isScrollIdle() => true;
         _requestedPage = target;
         _currentPage = target;
       });
-      _pageController.jumpToPage(target);
+      _jumpToPageExact(target);
       _scheduleSave();
       return;
     }
@@ -1108,7 +1206,7 @@ bool _isScrollIdle() => true;
       ..forward().whenComplete(() {
         if (!mounted) return;
         _coverJumping = true;
-        _pageController.jumpToPage(target);
+        _jumpToPageExact(target);
         setState(() {
           _coverFromPage = null;
           _coverToPage = null;
@@ -1124,25 +1222,38 @@ bool _isScrollIdle() => true;
     final from = _coverFromPage;
     final to = _coverToPage;
     if (from == null || to == null) return const SizedBox.shrink();
-    final progress = Curves.easeInOutCubic.transform(_coverAnim.value);
     final isNext = to > from;
-    final width = MediaQuery.sizeOf(context).width;
-    final movingOffset = (isNext ? -progress : -1 + progress) * width;
     final movingPage = isNext ? from : to;
     final staticPage = isNext ? to : from;
+    // Page surfaces are built once (as AnimatedBuilder.child) and only the
+    // slide offset updates each frame. RepaintBoundary lets Flutter rasterize
+    // the expensive Selectable-free text layers once, then just move them.
     return Positioned.fill(
       child: IgnorePointer(
-        child: ClipRect(
-          child: Stack(
-            children: [
-              Positioned.fill(child: _coverPageSurface(context, staticPage)),
-              Positioned.fill(
-                child: Transform.translate(
-                  offset: Offset(movingOffset, 0),
-                  child: _coverPageSurface(context, movingPage),
+        child: RepaintBoundary(
+          child: ClipRect(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                RepaintBoundary(child: _coverPageSurface(context, staticPage)),
+                AnimatedBuilder(
+                  animation: _coverAnim,
+                  child: RepaintBoundary(
+                    child: _coverPageSurface(context, movingPage),
+                  ),
+                  builder: (context, child) {
+                    final progress = Curves.easeInOutCubic.transform(
+                      _coverAnim.value,
+                    );
+                    final dx = isNext ? -progress : -1 + progress;
+                    return FractionalTranslation(
+                      translation: Offset(dx, 0),
+                      child: child,
+                    );
+                  },
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -1155,7 +1266,7 @@ bool _isScrollIdle() => true;
       color: _backgroundFor(context),
       child: Padding(
         padding: EdgeInsets.fromLTRB(28, 20, 28, _readerBottomInset),
-        child: _readingPage(context, page),
+        child: _readingPage(context, page, selectable: false),
       ),
     );
   }

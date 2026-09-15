@@ -85,6 +85,40 @@ class VellumReleaseInfo {
 
   bool get hasUpdate => _isNewer(latestVersion, currentVersion);
 
+  /// APK assets grouped by ABI label (`arm64-v8a`, `armeabi-v7a`, `x86_64`…).
+  ///
+  /// Each entry keeps the original asset name and download URL.
+  List<UpdateApkAsset> get apkAssets {
+    final list = <UpdateApkAsset>[];
+    for (final entry in assets.entries) {
+      final abi = detectAbiFromAssetName(entry.key);
+      list.add(
+        UpdateApkAsset(name: entry.key, url: entry.value, abi: abi),
+      );
+    }
+    list.sort((a, b) {
+      final rank = _abiRank(a.abi).compareTo(_abiRank(b.abi));
+      if (rank != 0) return rank;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+    return list;
+  }
+
+  static int _abiRank(String? abi) {
+    switch (abi) {
+      case 'arm64-v8a':
+        return 0;
+      case 'armeabi-v7a':
+        return 1;
+      case 'x86_64':
+        return 2;
+      case 'x86':
+        return 3;
+      default:
+        return 9;
+    }
+  }
+
   static bool _isNewer(String latest, String current) {
     List<int> parse(String value) => value
         .replaceFirst(RegExp(r'^[vV]'), '')
@@ -101,6 +135,40 @@ class VellumReleaseInfo {
     }
     return false;
   }
+}
+
+class UpdateApkAsset {
+  const UpdateApkAsset({
+    required this.name,
+    required this.url,
+    required this.abi,
+  });
+
+  final String name;
+  final String url;
+
+  /// `arm64-v8a` / `armeabi-v7a` / `x86_64` / `x86`, or null when unknown.
+  final String? abi;
+
+  String get label => abi ?? '通用';
+}
+
+/// Detects ABI from release asset filenames such as
+/// `Vellum-V1.0.2-arm64-v8a.apk` or `app-armeabi-v7a-release.apk`.
+String? detectAbiFromAssetName(String name) {
+  final lower = name.toLowerCase();
+  if (lower.contains('arm64') || lower.contains('aarch64')) return 'arm64-v8a';
+  if (lower.contains('armeabi') ||
+      lower.contains('arm-v7') ||
+      lower.contains('armv7') ||
+      lower.contains('arm-32')) {
+    return 'armeabi-v7a';
+  }
+  if (lower.contains('x86_64') || lower.contains('x86-64') || lower.contains('amd64')) {
+    return 'x86_64';
+  }
+  if (RegExp(r'(^|[^0-9])x86([^0-9_]|$)').hasMatch(lower)) return 'x86';
+  return null;
 }
 
 class VellumUpdateService {

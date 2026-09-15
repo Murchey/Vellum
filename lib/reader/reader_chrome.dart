@@ -73,46 +73,54 @@ class ReaderStatusBar extends StatelessWidget {
   const ReaderStatusBar({
     required this.progressLabel,
     required this.batteryLabel,
+    this.sessionLabel,
     super.key,
   });
 
   final String progressLabel;
   final String batteryLabel;
+  final String? sessionLabel;
 
   @override
-  Widget build(BuildContext context) => IgnorePointer(
-    // Parent SafeArea already handles system insets.
-    child: Align(
-      alignment: Alignment.bottomCenter,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
-        child: MediaQuery.withClampedTextScaling(
-          minScaleFactor: 1,
-          maxScaleFactor: 1.1,
-          child: Row(
-            children: [
-              Text(
-                progressLabel,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: VellumTheme.mutedOf(context).withValues(alpha: .82),
-                  fontSize: 11,
+  Widget build(BuildContext context) {
+    final muted = VellumTheme.mutedOf(context).withValues(alpha: .82);
+    final style = TextStyle(color: muted, fontSize: 11);
+    return IgnorePointer(
+      // Parent SafeArea already handles system insets.
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 6),
+          child: MediaQuery.withClampedTextScaling(
+            minScaleFactor: 1,
+            maxScaleFactor: 1.1,
+            child: Row(
+              children: [
+                Text(
+                  progressLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
                 ),
-              ),
-              const Spacer(),
-              Text(
-                batteryLabel,
-                maxLines: 1,
-                style: TextStyle(
-                  color: VellumTheme.mutedOf(context).withValues(alpha: .82),
-                  fontSize: 11,
-                ),
-              ),
-            ],
+                const Spacer(),
+                if (sessionLabel != null && sessionLabel!.isNotEmpty)
+                  Flexible(
+                    child: Text(
+                      sessionLabel!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
+                      style: style,
+                    ),
+                  ),
+                if (sessionLabel != null && sessionLabel!.isNotEmpty)
+                  const SizedBox(width: 8),
+                Text(batteryLabel, maxLines: 1, style: style),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

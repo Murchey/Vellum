@@ -47,6 +47,7 @@ class ImportedBook {
   String get storageId => id ?? BookLibraryIds.forBook(this);
 
   ImportedBook copyWith({
+    String? id,
     Uint8List? coverBytes,
     String? coverText,
     String? folderId,
@@ -54,7 +55,7 @@ class ImportedBook {
     bool clearCoverText = false,
     bool clearFolder = false,
   }) => ImportedBook(
-    id: id,
+    id: id ?? this.id,
     title: title,
     format: format,
     paragraphs: paragraphs,
@@ -82,15 +83,19 @@ class ImportedBook {
 
 abstract final class BookLibraryIds {
   static String forBook(ImportedBook book) {
-    final parts = [book.format.name, book.title, '\${book.paragraphCount}'];
+    final parts = [book.format.name, book.title, '${book.paragraphCount}'];
     final source = parts.join(String.fromCharCode(0));
     var hash = 0x811c9dc5;
     for (final unit in source.codeUnits) {
       hash ^= unit;
       hash = (hash * 0x01000193) & 0x7fffffff;
     }
-    return '\${book.format.name}_\${hash.toRadixString(16)}';
+    return '${book.format.name}_${hash.toRadixString(16)}';
   }
+
+  /// Ids written before the interpolation fix look like `${book.format.name}_…`
+  /// and were identical for every book.
+  static bool isLegacyBrokenId(String? id) => id != null && id.contains(r'${');
 }
 
 class HtmlContent {

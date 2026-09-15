@@ -103,24 +103,67 @@ class BookLibrary {
     try {
       final raw = jsonDecode(await file.readAsString());
       if (raw is! List<dynamic>) return [];
+      List<ImportedBook> books;
       if (raw.isNotEmpty && raw.first is Map<String, dynamic>) {
         final first = raw.first as Map<String, dynamic>;
         if (first.containsKey('paragraphs')) {
-          final books = [
+          books = [
             for (final entry in raw)
               _decodeBookContent(entry as Map<String, dynamic>),
           ];
+          books = _ensureUniqueBookIds(books);
           await save(books);
           return [for (final book in books) book.asIndexShell()];
         }
       }
-      return [
+      books = [
         for (final entry in raw)
           _decodeIndexEntry(entry as Map<String, dynamic>),
       ];
+      final repaired = _ensureUniqueBookIds(books);
+      if (!_sameBookIds(books, repaired)) {
+        await (await _file()).writeAsString(
+          await compute(_encodeLibraryIndex, repaired),
+          flush: true,
+        );
+      }
+      return repaired;
     } catch (_) {
       return [];
     }
+  }
+
+  bool _sameBookIds(List<ImportedBook> a, List<ImportedBook> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].storageId != b[i].storageId) return false;
+    }
+    return true;
+  }
+
+  /// Repairs ids from the broken interpolation era and any accidental
+  /// collisions so each shelf item maps to its own content file.
+  List<ImportedBook> _ensureUniqueBookIds(List<ImportedBook> books) {
+    final seen = <String>{};
+    final result = <ImportedBook>[];
+    for (final book in books) {
+      final id = book.id;
+      final usable =
+          id != null && id.isNotEmpty && !BookLibraryIds.isLegacyBrokenId(id);
+      if (usable && seen.add(id)) {
+        result.add(book);
+        continue;
+      }
+      final base = BookLibraryIds.forBook(book);
+      var candidate = base;
+      var suffix = 1;
+      while (!seen.add(candidate)) {
+        candidate = '${base}_$suffix';
+        suffix++;
+      }
+      result.add(book.copyWith(id: candidate));
+    }
+    return result;
   }
 
   Future<ImportedBook> loadBookContent(ImportedBook book) async {
@@ -306,15 +349,21 @@ class BookLibrary {
 
   Future<ReadingState> loadReadingState(ImportedBook book) async {
     final file = await _stateFile();
-    if (!await file.exists()) return const ReadingState();
+    if (!await file.exists()) {
+      return const ReadingState().copyWith(bookId: book.storageId);
+    }
     try {
       final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       final value = raw[_key(book)];
-      return value is Map<String, dynamic>
-          ? ReadingState.fromJson(value)
-          : const ReadingState();
+      if (value is! Map<String, dynamic>) {
+        return const ReadingState().copyWith(bookId: book.storageId);
+      }
+      final state = ReadingState.fromJson(value);
+      return state.bookId.isEmpty
+          ? state.copyWith(bookId: book.storageId)
+          : state;
     } catch (_) {
-      return const ReadingState();
+      return const ReadingState().copyWith(bookId: book.storageId);
     }
   }
 

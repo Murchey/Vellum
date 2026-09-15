@@ -42,6 +42,7 @@ class ReadingState {
     this.paragraphIndex = 0,
     this.bookmarks = const [],
     this.pageTurn = 'cover',
+    this.bookId = '',
   });
 
   final double fontSize;
@@ -58,6 +59,24 @@ class ReadingState {
   /// `cover` or `none` — page turn animation style.
   final String pageTurn;
 
+  /// Storage id of the book this state belongs to.
+  final String bookId;
+
+  ReadingState copyWith({String? bookId}) => ReadingState(
+    fontSize: fontSize,
+    readerFontFamily: readerFontFamily,
+    readerFontWeight: readerFontWeight,
+    lineSpacing: lineSpacing,
+    backgroundValue: backgroundValue,
+    mode: mode,
+    position: position,
+    page: page,
+    paragraphIndex: paragraphIndex,
+    bookmarks: bookmarks,
+    pageTurn: pageTurn,
+    bookId: bookId ?? this.bookId,
+  );
+
   Map<String, dynamic> toJson() => {
     'fontSize': fontSize,
     'readerFontFamily': readerFontFamily,
@@ -70,6 +89,7 @@ class ReadingState {
     'paragraphIndex': paragraphIndex,
     'bookmarks': bookmarks,
     'pageTurn': pageTurn,
+    'bookId': bookId,
   };
 
   factory ReadingState.fromJson(Map<String, dynamic> json) => ReadingState(
@@ -87,6 +107,7 @@ class ReadingState {
         .map((value) => value.toInt())
         .toList(),
     pageTurn: json['pageTurn'] as String? ?? 'cover',
+    bookId: json['bookId'] as String? ?? '',
   );
 }
 

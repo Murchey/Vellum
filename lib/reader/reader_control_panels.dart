@@ -181,6 +181,7 @@ class ReaderSettingsPanel extends StatelessWidget {
     required this.onPageTurnStyle,
     required this.onShowFonts,
     required this.onClose,
+    this.readingTimeLabel,
     super.key,
   });
 
@@ -198,6 +199,7 @@ class ReaderSettingsPanel extends StatelessWidget {
   final ValueChanged<PageTurnStyle> onPageTurnStyle;
   final VoidCallback onShowFonts;
   final VoidCallback onClose;
+  final String? readingTimeLabel;
 
   @override
   Widget build(BuildContext context) => ConstrainedBox(
@@ -213,6 +215,19 @@ class ReaderSettingsPanel extends StatelessWidget {
             title: '阅读设置',
             onClose: onClose,
           ),
+          if (readingTimeLabel != null && readingTimeLabel!.isNotEmpty) ...[
+            ReaderSettingRow(
+              label: '阅读时长',
+              child: Text(
+                readingTimeLabel!,
+                style: TextStyle(
+                  color: VellumTheme.inkOf(context),
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
           ReaderSettingRow(
             label: '阅读方式',
             child: CupertinoSlidingSegmentedControl<ReadingMode>(
