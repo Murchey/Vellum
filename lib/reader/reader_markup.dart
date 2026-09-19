@@ -28,6 +28,37 @@ abstract final class ReaderMarkup {
       .replaceAll(inlineTag, '')
       .replaceAll(inlineImage, '');
 
+  /// TOC filepos can land on a body paragraph; only short title-like text
+  /// is treated as a heading.
+  static bool looksLikeHeadingText(String source) {
+    final plain = source.trim();
+    if (plain.isEmpty || plain.length > 48) return false;
+    return !plain.contains('。') &&
+        !plain.contains('，') &&
+        !plain.contains('？') &&
+        !plain.contains('！') &&
+        !plain.contains('；') &&
+        !plain.contains(';');
+  }
+
+  static int? effectiveHeadingLevel({
+    required String paragraph,
+    required String fullParagraph,
+    required bool isTocEntry,
+  }) {
+    final match = heading.firstMatch(paragraph) ?? heading.firstMatch(fullParagraph);
+    final level = int.tryParse(match?.group(1) ?? '');
+    if (level != null) return level;
+    if (isTocEntry && looksLikeHeadingText(readerText(fullParagraph))) return 2;
+    return null;
+  }
+
+  /// Vertical chrome ReaderParagraph adds around headings.
+  static double headingChromeHeight(int? level) {
+    if (level == null) return 0;
+    return (level <= 2 ? 10 : 6) + 8;
+  }
+
   static double headingFontScale(int level) {
     switch (level) {
       case 1:

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/book_importer.dart';
 import '../services/book_library.dart';
+import '../services/notes_library.dart';
 import '../services/reading_stats.dart';
 import '../theme/vellum_theme.dart';
 import 'reader_chrome.dart';
@@ -55,6 +56,10 @@ class _ReaderPageState extends State<ReaderPage>
   int? _coverFromPage;
   int? _coverToPage;
   bool _coverJumping = false;
+  int _pendingPageDelta = 0;
+  bool _slideBusy = false;
+  final _notesLibrary = const NotesLibrary();
+  String _lastSelectedText = '';
   bool _showControls = false;
   late final ScrollController _scrollController;
   late final PageController _pageController;
@@ -71,6 +76,8 @@ class _ReaderPageState extends State<ReaderPage>
   Future<void> _saveQueue = Future<void>.value();
   DateTime? _readerPointerDownAt;
   Offset? _readerPointerDownPosition;
+  bool _pointerLooksLikeSelection = false;
+  Timer? _selectionHoldTimer;
   final Map<int, GlobalKey> _paragraphKeys = {};
   bool _scrollPositionRestored = false;
   bool _pagePositionRestored = false;
@@ -102,9 +109,19 @@ class _ReaderPageState extends State<ReaderPage>
         ? ReadingMode.page
         : ReadingMode.scroll;
     _pageTurnStyle = PageTurnStyle.fromStorage(widget.initialState.pageTurn);
+    _pager = ProgressiveBookPager(widget.book, const PageLayoutConfig(
+      fontSize: 19,
+      lineSpacing: ReaderLineSpacing.comfortable,
+      fontFamily: 'Georgia',
+      fontWeight: ReaderFontWeight.regular,
+      availableHeight: 600,
+      contentWidth: 360,
+      screenHeight: 800,
+      title: '',
+    ));
     _coverAnim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 320),
+      duration: const Duration(milliseconds: 240),
     );
     _scrollController = ScrollController()
       ..addListener(() {
@@ -171,22 +188,6 @@ class _ReaderPageState extends State<ReaderPage>
     _statsService.addSeconds(bookId: _bookId, seconds: seconds).then((stats) {
       if (mounted) _todaySeconds.value = stats.todaySeconds;
     });
-  }
-
-  String get _sessionLabel {
-    final session = _sessionSeconds.value;
-    final today = _todaySeconds.value + _unflushedReadSeconds;
-    final sessionText = _shortDuration(session);
-    final todayText = _shortDuration(today);
-    return '今日 $todayText · 本次 $sessionText';
-  }
-
-  String _shortDuration(int seconds) {
-    final value = seconds < 0 ? 0 : seconds;
-    if (value < 60) return '${value}s';
-    final minutes = value ~/ 60;
-    if (minutes < 60) return '$minutes 分';
-    return '${minutes ~/ 60} 时 ${minutes % 60} 分';
   }
 
   void _restoreScrollPositionWhenReady() {
@@ -259,6 +260,7 @@ class _ReaderPageState extends State<ReaderPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _selectionHoldTimer?.cancel();
     _readTimer?.cancel();
     _readStopwatch?.stop();
     _flushReadingTime();
@@ -329,6 +331,9 @@ class _ReaderPageState extends State<ReaderPage>
 
   bool _handleBookmarkPull(ScrollNotification notification) {
     if (_readingMode != ReadingMode.scroll) return false;
+    if (_pointerLooksLikeSelection || _lastSelectedText.isNotEmpty) {
+      return false;
+    }
     if (notification is OverscrollNotification &&
         notification.metrics.pixels <= 0 &&
         notification.overscroll < 0) {
@@ -374,13 +379,16 @@ class _ReaderPageState extends State<ReaderPage>
   /// Fixed bottom padding for the reading surface.
   /// Controls are a floating overlay and must not change this value, so
   /// opening the menu never reflows the page or re-paginates the book.
-  static const double _readerBottomInset = 48;
+  /// Tall enough for the progress/battery status line without clipping text.
+  static const double _readerBottomInset = 64;
 
   /// Viewport height for pagination. Shares the same fixed bottom reservation
   /// as list/page padding so layout stays identical with controls open or not.
   double _pageAvailableHeight(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final view = MediaQuery.viewPaddingOf(context);
+    // Must match PageView/padding: top 20 + bottom inset, inside SafeArea.
+    // Pagination subtracts an extra measurement slack internally.
     return size.height - view.top - view.bottom - 20 - _readerBottomInset;
   }
 
@@ -403,8 +411,10 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  int get _pageCount => _pages.length;
-  List<List<PageFragment>> _pages = const [[]];
+  /// How many measured pages to keep ahead of the current reading position.
+  static const int _pagesAhead = 100;
+  late ProgressiveBookPager _pager;
+  bool _paginateBusy = false;
   Size? _lastMeasuredSize;
   double? _lastMeasuredFontSize;
   ReaderLineSpacing? _lastMeasuredLineSpacing;
@@ -413,34 +423,84 @@ class _ReaderPageState extends State<ReaderPage>
   double? _lastMeasuredPageHeight;
   double? _lastMeasuredPageWidth;
   double? _lastMeasuredBottomInset;
-  void _ensurePages(BuildContext context) {
+
+  List<List<PageFragment>> get _pages => _pager.pages;
+  int get _pageCount => _pager.pageCount;
+
+  bool _layoutNeedsReset(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final pageHeight = _pageAvailableHeight(context);
     final pageWidth = _pageContentWidth(context);
     final bottomInset = _readerBottomInset;
-    if (_pages.length <= 1 ||
-        _lastMeasuredSize != size ||
+    return _lastMeasuredSize != size ||
         _lastMeasuredFontSize != _fontSize ||
         _lastMeasuredLineSpacing != _lineSpacing ||
         _lastMeasuredFontFamily != _readerFontFamily ||
         _lastMeasuredFontWeight != _readerFontWeight ||
         _lastMeasuredPageHeight != pageHeight ||
         _lastMeasuredPageWidth != pageWidth ||
-        _lastMeasuredBottomInset != bottomInset) {
-      try {
-        _pages = computeBookPages(widget.book, _pageLayoutConfig(context));
-      } catch (_) {
-        final cfg = _pageLayoutConfig(context);
-        _pages = computeBookPages(widget.book, cfg);
+        _lastMeasuredBottomInset != bottomInset;
+  }
+
+  void _recordLayoutMetrics(BuildContext context) {
+    _lastMeasuredSize = MediaQuery.sizeOf(context);
+    _lastMeasuredFontSize = _fontSize;
+    _lastMeasuredLineSpacing = _lineSpacing;
+    _lastMeasuredFontFamily = _readerFontFamily;
+    _lastMeasuredFontWeight = _readerFontWeight;
+    _lastMeasuredPageHeight = _pageAvailableHeight(context);
+    _lastMeasuredPageWidth = _pageContentWidth(context);
+    _lastMeasuredBottomInset = _readerBottomInset;
+  }
+
+  /// Progressive pagination: measure ahead of the current position in
+  /// small slices so first paint stays fast; extend as the reader advances.
+  void _ensurePages(BuildContext context) {
+    if (_layoutNeedsReset(context)) {
+      _pager = ProgressiveBookPager(widget.book, _pageLayoutConfig(context));
+      _recordLayoutMetrics(context);
+      final resumePara = widget.initialState.paragraphIndex.clamp(
+        0,
+        widget.book.paragraphs.isEmpty ? 0 : widget.book.paragraphs.length - 1,
+      );
+      _pager.paginateThrough(resumePara);
+      final resumePage = _pager.exactPageForParagraph(resumePara) ?? 0;
+      _pager.paginateUntilPages(resumePage + _pagesAhead);
+    } else {
+      final target = _currentPage + _pagesAhead;
+      if (!_pager.fullyPaginated && _pager.pageCount < target) {
+        _paginateAsync(targetPages: target);
       }
-      _lastMeasuredSize = size;
-      _lastMeasuredFontSize = _fontSize;
-      _lastMeasuredLineSpacing = _lineSpacing;
-      _lastMeasuredFontFamily = _readerFontFamily;
-      _lastMeasuredFontWeight = _readerFontWeight;
-      _lastMeasuredPageHeight = pageHeight;
-      _lastMeasuredPageWidth = pageWidth;
-      _lastMeasuredBottomInset = bottomInset;
+    }
+  }
+
+  void _paginateAsync({required int targetPages}) {
+    if (_paginateBusy) return;
+    _paginateBusy = true;
+    Future<void>(() async {
+      while (mounted && _paginateBusy) {
+        if (_pager.fullyPaginated || _pager.pageCount >= targetPages) break;
+        final sw = Stopwatch()..start();
+        while (mounted &&
+            !_pager.fullyPaginated &&
+            _pager.pageCount < targetPages &&
+            sw.elapsedMilliseconds < 12) {
+          _pager.paginateSlice(maxParagraphs: 20);
+        }
+        if (!mounted) break;
+        setState(() {});
+        if (_pager.fullyPaginated || _pager.pageCount >= targetPages) break;
+        await Future<void>.delayed(Duration.zero);
+      }
+      _paginateBusy = false;
+    });
+  }
+
+  void _maybeExtendPagination() {
+    if (_readingMode != ReadingMode.page || _pager.fullyPaginated) return;
+    final remaining = _pager.pageCount - _currentPage;
+    if (remaining < 24) {
+      _paginateAsync(targetPages: _currentPage + _pagesAhead);
     }
   }
 
@@ -455,14 +515,15 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   int _pageForParagraph(int paragraphIndex) {
-    for (var page = 0; page < _pages.length; page++) {
-      if (_pages[page].any(
-        (fragment) => fragment.paragraphIndex >= paragraphIndex,
-      )) {
-        return page;
-      }
+    if (paragraphIndex > _pager.nextParagraph) {
+      _pager.paginateThrough(paragraphIndex);
     }
-    return _pages.isEmpty ? 0 : _pages.length - 1;
+    final exact = _pager.exactPageForParagraph(paragraphIndex);
+    if (exact != null) {
+      return exact.clamp(0, (_pager.pageCount - 1).clamp(0, exact));
+    }
+    final ref = _pager.pageRefForParagraph(paragraphIndex);
+    return (ref.page1 - 1).clamp(0, _pager.pageCount - 1);
   }
 
   void _restorePageWhenReady() {
@@ -513,12 +574,26 @@ class _ReaderPageState extends State<ReaderPage>
     );
   }
 
-  Map<int, int> _chapterStartPages() =>
-      chapterStartPages(_chapterEntries(), _pageForParagraph);
+  Map<int, String> _chapterPageLabels() {
+    final entries = _chapterEntries();
+    final labels = <int, String>{};
+    for (final entry in entries) {
+      final ref = _pager.pageRefForParagraph(entry.key);
+      labels[entry.key] = ref.exact
+          ? '第 ${ref.page1} 页'
+          : '约第 ${ref.page1} 页';
+    }
+    return labels;
+  }
+
   List<MapEntry<int, String>> _chapterEntries() => chapterEntries(widget.book);
   String get _pageProgress {
     if (_readingMode == ReadingMode.page) {
-      return '${_currentPage + 1} / $_pageCount';
+      final total = _pager.estimatedTotalPageCount;
+      final current = (_currentPage + 1).clamp(1, total);
+      return _pager.fullyPaginated
+          ? '$current / $total'
+          : '$current / ~$total';
     }
     final percent = (_progress * 100).clamp(0, 100).round();
     final paragraph = (_currentParagraph + 1).clamp(
@@ -531,8 +606,9 @@ class _ReaderPageState extends State<ReaderPage>
   String get _batteryText => _batteryLevel < 0 ? '电量 —' : '电量 $_batteryLevel%';
   double get _progress {
     if (_readingMode == ReadingMode.page) {
-      if (_pageCount <= 1) return 0;
-      return (_currentPage / (_pageCount - 1)).clamp(0.0, 1.0);
+      final total = _pager.estimatedTotalPageCount;
+      if (total <= 1) return 0;
+      return (_currentPage / (total - 1)).clamp(0.0, 1.0);
     }
     if (!_scrollController.hasClients) return 0;
     final position = _scrollController.position;
@@ -547,7 +623,10 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   bool get _canSeekProgress {
-    if (_readingMode == ReadingMode.page) return _pageCount > 1;
+    if (_readingMode == ReadingMode.page) {
+      return _pager.estimatedTotalPageCount > 1 ||
+          widget.book.paragraphs.length > 1;
+    }
     if (!_scrollController.hasClients) return false;
     final position = _scrollController.position;
     return position.hasPixels &&
@@ -558,8 +637,13 @@ class _ReaderPageState extends State<ReaderPage>
   void _jumpToProgress(double value) {
     final target = value.clamp(0.0, 1.0);
     if (_readingMode == ReadingMode.page) {
-      if (_pageCount <= 0) return;
-      final page = (target * (_pageCount - 1)).round().clamp(0, _pageCount - 1);
+      final totalParas = widget.book.paragraphs.length;
+      if (totalParas <= 0) return;
+      final para = (target * (totalParas - 1)).round().clamp(0, totalParas - 1);
+      // Measure through the destination so TOC/page numbers stay consistent.
+      _pager.paginateThrough(para);
+      final page = _pageForParagraph(para);
+      _paginateAsync(targetPages: page + _pagesAhead);
       setState(() {
         _currentPage = page;
         _requestedPage = page;
@@ -759,8 +843,11 @@ bool _isScrollIdle() => true;
   void _handleReaderPointerUp(BuildContext context, PointerUpEvent event) {
     final pressedAt = _readerPointerDownAt;
     final pressedPosition = _readerPointerDownPosition;
+    final selectionGesture = _pointerLooksLikeSelection ||
+        (_lastSelectedText.isNotEmpty && _pullDownDistance > 0);
     _readerPointerDownAt = null;
     _readerPointerDownPosition = null;
+    _pointerLooksLikeSelection = false;
     if (_pullDownDistance != 0) {
       setState(() => _pullDownDistance = 0);
     }
@@ -777,6 +864,7 @@ bool _isScrollIdle() => true;
       isIdle: _isScrollIdle(),
       screenWidth: size.width,
       screenHeight: size.height,
+      selectionGesture: selectionGesture,
     );
     switch (action) {
       case ReaderTapAction.none:
@@ -810,18 +898,46 @@ bool _isScrollIdle() => true;
               context: context,
               delegates: const [DefaultMaterialLocalizations.delegate],
               child: SelectionArea(
+                onSelectionChanged: (content) {
+                  _lastSelectedText = content?.plainText.trim() ?? '';
+                },
                 contextMenuBuilder: (context, selectableRegionState) {
-                  final buttonItems = selectableRegionState
-                      .contextMenuButtonItems
-                      .map(
-                        (item) => item.type == ContextMenuButtonType.copy
-                            ? ContextMenuButtonItem(
-                                label: '复制',
-                                onPressed: item.onPressed,
-                              )
-                            : item,
-                      )
-                      .toList();
+                  final selected = _lastSelectedText.trim();
+                  final buttonItems = <ContextMenuButtonItem>[
+                    // Keep the platform copy action (SelectionArea handles it).
+                    ...selectableRegionState.contextMenuButtonItems,
+                    if (selected.isNotEmpty)
+                      ContextMenuButtonItem(
+                        label: 'Bing 查询',
+                        onPressed: () {
+                          selectableRegionState.hideToolbar();
+                          openSelectionService(selected, translate: false);
+                        },
+                      ),
+                    if (selected.isNotEmpty)
+                      ContextMenuButtonItem(
+                        label: 'DeepL 翻译',
+                        onPressed: () {
+                          selectableRegionState.hideToolbar();
+                          openSelectionService(selected, translate: true);
+                        },
+                      ),
+                    if (selected.isNotEmpty)
+                      ContextMenuButtonItem(
+                        label: '笔记',
+                        onPressed: () async {
+                          selectableRegionState.hideToolbar();
+                          await showAddNoteSheet(
+                            context,
+                            bookId: _bookId,
+                            bookTitle: widget.book.title,
+                            paragraphIndex: _currentParagraph,
+                            selectedText: selected,
+                            notesLibrary: _notesLibrary,
+                          );
+                        },
+                      ),
+                  ];
                   return CupertinoAdaptiveTextSelectionToolbar.buttonItems(
                     anchors: selectableRegionState.contextMenuAnchors,
                     buttonItems: buttonItems,
@@ -831,17 +947,29 @@ bool _isScrollIdle() => true;
                   onPointerDown: (event) {
                     _readerPointerDownAt = DateTime.now();
                     _readerPointerDownPosition = event.position;
+                    _pointerLooksLikeSelection = false;
+                    _selectionHoldTimer?.cancel();
+                    _selectionHoldTimer = Timer(
+                      const Duration(milliseconds: 400),
+                      () {
+                        _pointerLooksLikeSelection = true;
+                      },
+                    );
                   },
                   onPointerMove: _handleReaderPointerMove,
                   onPointerCancel: (_) {
+                    _selectionHoldTimer?.cancel();
                     _readerPointerDownAt = null;
                     _readerPointerDownPosition = null;
+                    _pointerLooksLikeSelection = false;
                     if (_pullDownDistance != 0) {
                       setState(() => _pullDownDistance = 0);
                     }
                   },
-                  onPointerUp: (event) =>
-                      _handleReaderPointerUp(context, event),
+                  onPointerUp: (event) {
+                    _selectionHoldTimer?.cancel();
+                    _handleReaderPointerUp(context, event);
+                  },
                   child: _readingMode == ReadingMode.scroll
                       ? NotificationListener<ScrollNotification>(
                           onNotification: _handleBookmarkPull,
@@ -888,7 +1016,13 @@ bool _isScrollIdle() => true;
                                       _backgroundFor(context),
                                     ),
                                     contextMenuBuilder:
-                                        buildReaderSelectionToolbar,
+                                        createReaderSelectionToolbar(
+                                          bookId: _bookId,
+                                          bookTitle: widget.book.title,
+                                          currentParagraph: () =>
+                                              paragraphIndex,
+                                          notesLibrary: _notesLibrary,
+                                        ),
                                     onJumpToParagraph: _jumpToParagraph,
                                   ),
                                 ),
@@ -906,13 +1040,14 @@ bool _isScrollIdle() => true;
                               allowImplicitScrolling: true,
                               itemCount: _pageCount,
                               onPageChanged: (index) {
-                                if (_coverJumping) {
+                                if (_coverJumping || _slideBusy) {
                                   return;
                                 }
                                 setState(() {
                                   _currentPage = index;
                                   _requestedPage = index;
                                 });
+                                _maybeExtendPagination();
                                 _scheduleSave();
                               },
                               itemBuilder: (context, index) => Padding(
@@ -933,13 +1068,9 @@ bool _isScrollIdle() => true;
             if (_pullDownDistance > 8) _bookmarkPullIndicator(context),
             if (_coverFromPage != null) _coverTurnOverlay(context),
             if (!_showControls)
-              ListenableBuilder(
-                listenable: Listenable.merge([_sessionSeconds, _todaySeconds]),
-                builder: (context, _) => ReaderStatusBar(
-                  progressLabel: _pageProgress,
-                  batteryLabel: _batteryText,
-                  sessionLabel: _sessionLabel,
-                ),
+              ReaderStatusBar(
+                progressLabel: _pageProgress,
+                batteryLabel: _batteryText,
               ),
             if (_showControls)
               ReaderHeaderPanel(
@@ -1017,9 +1148,8 @@ bool _isScrollIdle() => true;
                       progress: _progress,
                       canSeek: _canSeekProgress,
                       currentParagraph: _activeParagraph,
-                      readingTimeLabel: _sessionLabel,
                       chapters: _chapterEntries(),
-                      chapterStartPages: _chapterStartPages(),
+                      chapterPageLabels: _chapterPageLabels(),
                       bookmarks: [
                         for (final bookmark in _bookmarks)
                           MapEntry(
@@ -1085,9 +1215,8 @@ bool _isScrollIdle() => true;
         children: [
           SizedBox(
             height: constraints.maxHeight,
-            // Estimated pagination can slightly overshoot. Clip instead of
-            // throwing a bottom-overflow error on the page column.
             child: ClipRect(
+              clipBehavior: Clip.hardEdge,
               child: OverflowBox(
                 alignment: Alignment.topLeft,
                 minHeight: constraints.maxHeight,
@@ -1114,10 +1243,14 @@ bool _isScrollIdle() => true;
                           fontFamily: _readerFontFamily,
                           lineSpacing: _lineSpacing,
                           fontWeight: _readerFontWeight,
-                          ink: VellumTheme.readerInkFor(
-                            _backgroundFor(context),
+                          ink: VellumTheme.readerInkFor(_backgroundFor(context)),
+                          contextMenuBuilder: createReaderSelectionToolbar(
+                            bookId: _bookId,
+                            bookTitle: widget.book.title,
+                            currentParagraph: () =>
+                                fragments[index].paragraphIndex,
+                            notesLibrary: _notesLibrary,
                           ),
-                          contextMenuBuilder: buildReaderSelectionToolbar,
                           showImage: fragments[index].showImage,
                           showLinkAction:
                               selectable && fragments[index].showLinkAction,
@@ -1182,9 +1315,12 @@ bool _isScrollIdle() => true;
     final live = _pageController.hasClients
         ? _pageController.page?.round()
         : null;
-    final base = (live ?? _requestedPage).clamp(0, pageCount - 1);
+    var base = (live ?? _requestedPage).clamp(0, pageCount - 1);
+    if (_coverFromPage != null) base = _coverToPage ?? base;
+    if (_slideBusy) base = _requestedPage.clamp(0, pageCount - 1);
     final target = (base + delta).clamp(0, pageCount - 1);
-    if (target == base) return;
+    if (target == base && !_coverAnim.isAnimating && !_slideBusy) return;
+
     if (_pageTurnStyle == PageTurnStyle.none) {
       setState(() {
         _requestedPage = target;
@@ -1194,28 +1330,87 @@ bool _isScrollIdle() => true;
       _scheduleSave();
       return;
     }
-    if (_coverAnim.isAnimating) return;
-    _coverFromPage = base;
-    _coverToPage = target;
-    setState(() {
+
+    if (_pageTurnStyle == PageTurnStyle.slide) {
+      _startSlideTurn(target);
+      return;
+    }
+
+    // Cover (and default): queue rapid taps instead of dropping them.
+    if (_coverAnim.isAnimating) {
+      _pendingPageDelta += delta;
+      return;
+    }
+    _startCoverTurn(base, target);
+  }
+
+  void _startSlideTurn(int target) {
+    if (!_pageController.hasClients) return;
+    if (_slideBusy) {
       _requestedPage = target;
-      _currentPage = target;
+      _pageController.jumpToPage(_requestedPage);
+    }
+    _slideBusy = true;
+    setState(() => _requestedPage = target);
+    _pageController
+        .animateToPage(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+        )
+        .whenComplete(() {
+          if (!mounted) return;
+          setState(() {
+            _currentPage = target;
+            _requestedPage = target;
+          });
+          _slideBusy = false;
+          _scheduleSave();
+        });
+  }
+
+  void _startCoverTurn(int from, int to) {
+    _coverFromPage = from;
+    _coverToPage = to;
+    // Keep PageView on [from] during the overlay so the underlying page does
+    // not re-layout mid-animation (avoids visible “reflow” under the cover).
+    setState(() {
+      _requestedPage = to;
     });
     _coverAnim
       ..reset()
       ..forward().whenComplete(() {
         if (!mounted) return;
-        _coverJumping = true;
-        _jumpToPageExact(target);
-        setState(() {
-          _coverFromPage = null;
-          _coverToPage = null;
-        });
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _coverJumping = false;
-        });
-        _scheduleSave();
+        _finishCoverTurn(to);
       });
+  }
+
+  void _finishCoverTurn(int to) {
+    _coverJumping = true;
+    _jumpToPageExact(to);
+    setState(() {
+      _currentPage = to;
+      _requestedPage = to;
+    });
+    // Drop the overlay one frame after the jump so the user never sees
+    // PageView rebuild/layout under the cover.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _coverFromPage = null;
+        _coverToPage = null;
+      });
+      _coverJumping = false;
+      _scheduleSave();
+      final pending = _pendingPageDelta;
+      _pendingPageDelta = 0;
+      if (pending != 0) {
+        final pageCount = _pageCount;
+        final base = to.clamp(0, pageCount - 1);
+        final next = (base + pending).clamp(0, pageCount - 1);
+        if (next != base) _startCoverTurn(base, next);
+      }
+    });
   }
 
   Widget _coverTurnOverlay(BuildContext context) {

@@ -8,7 +8,7 @@ class ReaderDirectoryPanel extends StatefulWidget {
   const ReaderDirectoryPanel({
     required this.chapters,
     required this.bookmarks,
-    required this.chapterStartPages,
+    required this.chapterPageLabels,
     required this.currentParagraph,
     required this.readingMode,
     required this.onJumpToParagraph,
@@ -19,7 +19,7 @@ class ReaderDirectoryPanel extends StatefulWidget {
 
   final List<MapEntry<int, String>> chapters;
   final List<MapEntry<int, String>> bookmarks;
-  final Map<int, int> chapterStartPages;
+  final Map<int, String> chapterPageLabels;
   final int currentParagraph;
   final ReadingMode readingMode;
   final ValueChanged<int> onJumpToParagraph;
@@ -124,7 +124,8 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
                                   ? Text('第 ${entry.key + 1} 段')
                                   : Text(
                                       widget.readingMode == ReadingMode.page
-                                          ? '第 ${widget.chapterStartPages[entry.key] ?? 1} 页'
+                                          ? (widget.chapterPageLabels[entry.key] ??
+                                                '约第 ${entry.key + 1} 页')
                                           : '第 ${entry.key + 1} 段',
                                       style: TextStyle(
                                         color: VellumTheme.mutedOf(context),
@@ -181,7 +182,6 @@ class ReaderSettingsPanel extends StatelessWidget {
     required this.onPageTurnStyle,
     required this.onShowFonts,
     required this.onClose,
-    this.readingTimeLabel,
     super.key,
   });
 
@@ -199,7 +199,6 @@ class ReaderSettingsPanel extends StatelessWidget {
   final ValueChanged<PageTurnStyle> onPageTurnStyle;
   final VoidCallback onShowFonts;
   final VoidCallback onClose;
-  final String? readingTimeLabel;
 
   @override
   Widget build(BuildContext context) => ConstrainedBox(
@@ -215,19 +214,6 @@ class ReaderSettingsPanel extends StatelessWidget {
             title: '阅读设置',
             onClose: onClose,
           ),
-          if (readingTimeLabel != null && readingTimeLabel!.isNotEmpty) ...[
-            ReaderSettingRow(
-              label: '阅读时长',
-              child: Text(
-                readingTimeLabel!,
-                style: TextStyle(
-                  color: VellumTheme.inkOf(context),
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
           ReaderSettingRow(
             label: '阅读方式',
             child: CupertinoSlidingSegmentedControl<ReadingMode>(

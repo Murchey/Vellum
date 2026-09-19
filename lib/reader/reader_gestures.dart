@@ -20,6 +20,10 @@ abstract final class ReaderGestures {
 
   static const double bookmarkPullThreshold = 96;
 
+  /// Long-press to select text then drag down must not arm bookmark.
+  /// Bookmark requires a quick, mostly vertical downward flick at the top.
+  static const Duration bookmarkMaxHold = Duration(milliseconds: 400);
+
   static ReaderTapAction resolvePointerUp({
     required DateTime? downAt,
     required Offset? downPosition,
@@ -29,16 +33,21 @@ abstract final class ReaderGestures {
     required bool isIdle,
     required double screenWidth,
     required double screenHeight,
+    bool selectionGesture = false,
   }) {
     if (downAt == null || downPosition == null) return ReaderTapAction.none;
 
-    final downwardPull = upPosition.dy - downPosition.dy > bookmarkPullThreshold;
-    if (downwardPull && beginsAtScrollTop) {
+    final elapsed = DateTime.now().difference(downAt);
+    final delta = upPosition - downPosition;
+    final downwardPull = delta.dy > bookmarkPullThreshold;
+    final horizontalShift = delta.dx.abs();
+    final quickFlick = elapsed < bookmarkMaxHold && !selectionGesture;
+    final mostlyVertical = horizontalShift < 48;
+    if (downwardPull && beginsAtScrollTop && quickFlick && mostlyVertical) {
       return ReaderTapAction.toggleBookmark;
     }
-
-    if (DateTime.now().difference(downAt) >= const Duration(milliseconds: 450) ||
-        (upPosition - downPosition).distance > 12) {
+    // A long-press drag is selection, not a tap action.
+    if (elapsed >= const Duration(milliseconds: 450) || delta.distance > 12) {
       return ReaderTapAction.none;
     }
     if (!isIdle) return ReaderTapAction.none;

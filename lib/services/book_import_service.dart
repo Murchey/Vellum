@@ -7,6 +7,12 @@ import 'package:flutter/foundation.dart' show compute;
 import 'book_importer.dart';
 import 'book_library.dart';
 
+class ImportProgress {
+  const ImportProgress(this.stage, this.value);
+  final String stage;
+  final double value;
+}
+
 ImportedBook decodeBookInBackground(Map<String, dynamic> message) {
   final path = message['path'] as String?;
   final source = message['bytes'];
@@ -25,8 +31,14 @@ class BookImportService {
 
   Future<ImportedBook?> pickAndDecode({
     void Function(String stage)? onStage,
+    void Function(ImportProgress progress)? onProgress,
   }) async {
-    onStage?.call('正在打开文件选择器…');
+    void report(String stage, double value) {
+      onStage?.call(stage);
+      onProgress?.call(ImportProgress(stage, value));
+    }
+
+    report('正在打开文件选择器…', 0.05);
     await Future<void>.delayed(Duration.zero);
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -42,9 +54,15 @@ class BookImportService {
         '文件提供方没有返回可读数据。请将 MOBI 复制到设备 Download 后重试。',
       );
     }
-    onStage?.call('正在解析《${file.name}》…');
+    final sizeHint = bytes?.length ?? 0;
+    report('正在读取《${file.name}》…', 0.2);
     await Future<void>.delayed(Duration.zero);
-    return compute(decodeBookInBackground, <String, dynamic>{
+    report('正在解析《${file.name}》…', 0.45);
+    if (sizeHint > 8 * 1024 * 1024) {
+      onStage?.call('正在解析大型电子书，可能需要一些时间…');
+    }
+    await Future<void>.delayed(Duration.zero);
+    final book = await compute(decodeBookInBackground, <String, dynamic>{
       'filename': file.name,
       if (Platform.isAndroid && bytes != null)
         'bytes': TransferableTypedData.fromList([bytes])
@@ -53,6 +71,8 @@ class BookImportService {
       else
         'bytes': TransferableTypedData.fromList([bytes!]),
     });
+    report('解析完成，共 ${book.paragraphCount} 段', 0.85);
+    return book;
   }
 
   /// Replaces any same title+format entry and persists the library.

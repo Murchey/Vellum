@@ -348,26 +348,74 @@ class BookLibrary {
   }
 
   Future<ReadingState> loadReadingState(ImportedBook book) async {
+    final prefs = await loadReaderPreferences();
     final file = await _stateFile();
     if (!await file.exists()) {
-      return const ReadingState().copyWith(bookId: book.storageId);
+      return ReadingState(
+        fontSize: prefs.fontSize,
+        readerFontFamily: prefs.readerFontFamily,
+        readerFontWeight: prefs.readerFontWeight,
+        lineSpacing: prefs.lineSpacing,
+        backgroundValue: prefs.backgroundValue,
+        mode: prefs.mode,
+        pageTurn: prefs.pageTurn,
+      ).copyWith(bookId: book.storageId);
     }
     try {
       final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       final value = raw[_key(book)];
+      // Display settings are global; only progress/bookmarks stay per book.
       if (value is! Map<String, dynamic>) {
-        return const ReadingState().copyWith(bookId: book.storageId);
+        return ReadingState(
+          fontSize: prefs.fontSize,
+          readerFontFamily: prefs.readerFontFamily,
+          readerFontWeight: prefs.readerFontWeight,
+          lineSpacing: prefs.lineSpacing,
+          backgroundValue: prefs.backgroundValue,
+          mode: prefs.mode,
+          pageTurn: prefs.pageTurn,
+        ).copyWith(bookId: book.storageId);
       }
-      final state = ReadingState.fromJson(value);
-      return state.bookId.isEmpty
-          ? state.copyWith(bookId: book.storageId)
-          : state;
+      final saved = ReadingState.fromJson(value);
+      return ReadingState(
+        fontSize: prefs.fontSize,
+        readerFontFamily: prefs.readerFontFamily,
+        readerFontWeight: prefs.readerFontWeight,
+        lineSpacing: prefs.lineSpacing,
+        backgroundValue: prefs.backgroundValue,
+        mode: prefs.mode,
+        pageTurn: prefs.pageTurn,
+        position: saved.position,
+        page: saved.page,
+        paragraphIndex: saved.paragraphIndex,
+        bookmarks: saved.bookmarks,
+        bookId: book.storageId,
+      );
     } catch (_) {
-      return const ReadingState().copyWith(bookId: book.storageId);
+      return ReadingState(
+        fontSize: prefs.fontSize,
+        readerFontFamily: prefs.readerFontFamily,
+        readerFontWeight: prefs.readerFontWeight,
+        lineSpacing: prefs.lineSpacing,
+        backgroundValue: prefs.backgroundValue,
+        mode: prefs.mode,
+        pageTurn: prefs.pageTurn,
+      ).copyWith(bookId: book.storageId);
     }
   }
 
   Future<void> saveReadingState(ImportedBook book, ReadingState state) async {
+    await saveReaderPreferences(
+      ReaderPreferences(
+        fontSize: state.fontSize,
+        readerFontFamily: state.readerFontFamily,
+        readerFontWeight: state.readerFontWeight,
+        lineSpacing: state.lineSpacing,
+        backgroundValue: state.backgroundValue,
+        mode: state.mode,
+        pageTurn: state.pageTurn,
+      ),
+    );
     final file = await _stateFile();
     Map<String, dynamic> states = {};
     if (await file.exists()) {
@@ -377,8 +425,30 @@ class BookLibrary {
         states = {};
       }
     }
-    states[_key(book)] = state.toJson();
+    // Progress only — display prefs live in the shared preferences file.
+    states[_key(book)] = {
+      'position': state.position,
+      'page': state.page,
+      'paragraphIndex': state.paragraphIndex,
+      'bookmarks': state.bookmarks,
+      'bookId': book.storageId,
+    };
     await file.writeAsString(jsonEncode(states));
+  }
+
+  Future<ReaderPreferences> loadReaderPreferences() async {
+    try {
+      final file = await _prefsFile();
+      if (!await file.exists()) return const ReaderPreferences();
+      final raw = jsonDecode(await file.readAsString());
+      if (raw is Map<String, dynamic>) return ReaderPreferences.fromJson(raw);
+    } catch (_) {}
+    return const ReaderPreferences();
+  }
+
+  Future<void> saveReaderPreferences(ReaderPreferences prefs) async {
+    final file = await _prefsFile();
+    await file.writeAsString(jsonEncode(prefs.toJson()), flush: true);
   }
 
   Future<void> deleteReadingState(ImportedBook book) async {
@@ -503,6 +573,10 @@ class BookLibrary {
 
   Future<File> _stateFile() async => File(
     '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_reading_state.json',
+  );
+
+  Future<File> _prefsFile() async => File(
+    '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_reader_prefs.json',
   );
 
   Future<File> _foldersFile() async {

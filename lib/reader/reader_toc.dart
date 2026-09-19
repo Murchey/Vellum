@@ -53,3 +53,18 @@ Map<int, int> chapterStartPages(
 ) => {
   for (final entry in chapters) entry.key: pageForParagraph(entry.key) + 1,
 };
+
+/// 1-based page label for a chapter, marking estimates while paginating.
+String chapterPageLabel({
+  required int paragraphIndex,
+  required int Function(int) exactPageForParagraph,
+  required int Function(int) estimatedPageForParagraph,
+  required bool fullyPaginated,
+}) {
+  if (fullyPaginated) {
+    return '第 ${exactPageForParagraph(paragraphIndex) + 1} 页';
+  }
+  final exact = exactPageForParagraph(paragraphIndex);
+  if (exact >= 0) return '第 ${exact + 1} 页';
+  return '约第 ${estimatedPageForParagraph(paragraphIndex) + 1} 页';
+}

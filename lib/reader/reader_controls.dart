@@ -23,7 +23,7 @@ class ReaderBottomControls extends StatefulWidget {
     required this.canSeek,
     required this.currentParagraph,
     required this.chapters,
-    required this.chapterStartPages,
+    required this.chapterPageLabels,
     required this.bookmarks,
     required this.onProgress,
     required this.onJumpToParagraph,
@@ -37,7 +37,6 @@ class ReaderBottomControls extends StatefulWidget {
     required this.onReadingMode,
     this.pageTurnStyle = PageTurnStyle.cover,
     required this.onPageTurnStyle,
-    this.readingTimeLabel,
     super.key,
   });
 
@@ -50,7 +49,7 @@ class ReaderBottomControls extends StatefulWidget {
   final bool canSeek;
   final int currentParagraph;
   final List<MapEntry<int, String>> chapters;
-  final Map<int, int> chapterStartPages;
+  final Map<int, String> chapterPageLabels;
   final List<MapEntry<int, String>> bookmarks;
   final ValueChanged<double> onProgress;
   final ValueChanged<int> onJumpToParagraph;
@@ -64,7 +63,6 @@ class ReaderBottomControls extends StatefulWidget {
   final ValueChanged<ReadingMode> onReadingMode;
   final PageTurnStyle pageTurnStyle;
   final ValueChanged<PageTurnStyle> onPageTurnStyle;
-  final String? readingTimeLabel;
 
   @override
   State<ReaderBottomControls> createState() => _ReaderBottomControlsState();
@@ -170,7 +168,7 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                               ReaderDirectoryPanel(
                                 chapters: widget.chapters,
                                 bookmarks: widget.bookmarks,
-                                chapterStartPages: widget.chapterStartPages,
+                                chapterPageLabels: widget.chapterPageLabels,
                                 currentParagraph: widget.currentParagraph,
                                 readingMode: widget.readingMode,
                                 onJumpToParagraph: widget.onJumpToParagraph,
@@ -185,7 +183,6 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                               background: widget.background,
                               readingMode: widget.readingMode,
                               pageTurnStyle: widget.pageTurnStyle,
-                              readingTimeLabel: widget.readingTimeLabel,
                               onFontSize: widget.onFontSize,
                               onReaderFontWeight: widget.onReaderFontWeight,
                               onLineSpacing: widget.onLineSpacing,

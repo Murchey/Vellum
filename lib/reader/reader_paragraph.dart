@@ -71,8 +71,11 @@ class ReaderParagraph extends StatelessWidget {
     final isTocHeading = book.tocEntries.any(
       (entry) => entry.paragraphIndex == paragraphIndex,
     );
-    final headingLevel = int.tryParse(heading?.group(1) ?? '');
-    final effectiveHeading = headingLevel ?? (isTocHeading ? 2 : null);
+    final effectiveHeading = ReaderMarkup.effectiveHeadingLevel(
+      paragraph: paragraph,
+      fullParagraph: fullParagraph,
+      isTocEntry: isTocHeading,
+    );
     final scale = effectiveHeading == null
         ? 1.0
         : ReaderMarkup.headingFontScale(effectiveHeading);

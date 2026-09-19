@@ -27,6 +27,13 @@ class PageLayoutConfig {
   final double screenHeight;
   final String title;
 
+  /// SelectableText/strut can be a few pixels taller than TextPainter.
+  /// Reserve slack so the last line is never clipped at the page bottom.
+  static const double measurementSlack = 12;
+
+  double get usableHeight =>
+      (availableHeight - measurementSlack).clamp(80.0, availableHeight);
+
   double get lineHeight => fontSize * lineSpacing.height;
 
   TextStyle get measureStyle => TextStyle(
@@ -34,18 +41,271 @@ class PageLayoutConfig {
     fontSize: fontSize,
     height: lineSpacing.height,
     fontWeight: fontWeight.value,
+    // Match body text; headings use bold via their own scale in render.
   );
 }
 
 /// Exact or estimated pagination for [book] under [config].
+///
+/// Prefer [ProgressiveBookPager] for interactive reading — it paginates
+/// ahead of the current position in slices instead of locking the UI on
+/// the whole book.
 List<List<PageFragment>> computeBookPages(
   ImportedBook book,
   PageLayoutConfig config,
 ) {
-  if (book.paragraphs.length > 2000) {
-    return _estimateLargeBookPages(book, config);
+  final pager = ProgressiveBookPager(book, config);
+  while (pager.paginateSlice(maxParagraphs: 200)) {}
+  return pager.pages;
+}
+
+/// Incremental paginator: keeps exact pages for a growing prefix of the book
+/// and estimates page numbers for chapters that are not measured yet.
+class ProgressiveBookPager {
+  ProgressiveBookPager(this.book, PageLayoutConfig config)
+    : _config = config,
+      _contentSize = Size(config.contentWidth, config.screenHeight) {
+    reset();
   }
-  return _exactPages(book, config);
+
+  final ImportedBook book;
+  final PageLayoutConfig _config;
+  final Size _contentSize;
+
+  final List<List<PageFragment>> pages = [];
+  final Map<int, int> _paragraphFirstPage = {};
+  int _nextParagraph = 0;
+  bool _finished = false;
+  double _usedHeight = 0;
+  bool _needsTitleSpace = true;
+
+  bool get fullyPaginated => _finished;
+  int get pageCount => pages.isEmpty ? 1 : pages.length;
+  int get nextParagraph => _nextParagraph;
+
+  /// Best-effort total page count for progress display / TOC estimates.
+  int get estimatedTotalPageCount {
+    if (_finished) return pageCount;
+    final totalParas = book.paragraphs.length;
+    if (totalParas <= 0) return pageCount;
+    final done = _nextParagraph.clamp(1, totalParas);
+    final avg = pages.length / done;
+    final remaining = totalParas - done;
+    final est = pages.length + (remaining * avg).round();
+    return est.clamp(pageCount, pages.length + totalParas + 2);
+  }
+
+  void reset() {
+    pages
+      ..clear()
+      ..add([]);
+    _paragraphFirstPage.clear();
+    _nextParagraph = 0;
+    _finished = false;
+    _usedHeight = 0;
+    _needsTitleSpace = true;
+  }
+
+  /// Paginate up to [maxParagraphs] more source paragraphs.
+  /// Returns true when more book content remains.
+  bool paginateSlice({int maxParagraphs = 30}) {
+    if (_finished) return false;
+    if (pages.isEmpty) pages.add([]);
+    if (_needsTitleSpace) {
+      _usedHeight = measureTitleHeight(_config) + 30;
+      _needsTitleSpace = false;
+    }
+    final total = book.paragraphs.length;
+    var processed = 0;
+    while (_nextParagraph < total && processed < maxParagraphs) {
+      _paginateParagraph(_nextParagraph);
+      _nextParagraph++;
+      processed++;
+    }
+    if (_nextParagraph >= total) _finished = true;
+    return !_finished;
+  }
+
+  /// Ensure [paragraphIndex] has an exact page mapping.
+  void paginateThrough(int paragraphIndex) {
+    var guard = 0;
+    while (!_finished &&
+        _nextParagraph <= paragraphIndex &&
+        guard < 20000) {
+      paginateSlice(maxParagraphs: 40);
+      guard++;
+    }
+  }
+
+  /// Ensure at least [minPages] exact pages exist.
+  void paginateUntilPages(int minPages) {
+    var guard = 0;
+    while (!_finished && pages.length < minPages && guard < 20000) {
+      paginateSlice(maxParagraphs: 25);
+      guard++;
+    }
+  }
+
+  /// 0-based page that contains [paragraphIndex], if already measured.
+  int? exactPageForParagraph(int paragraphIndex) =>
+      _paragraphFirstPage[paragraphIndex];
+
+  /// 1-based page label plus whether it is measured or estimated.
+  ({int page1, bool exact}) pageRefForParagraph(int paragraphIndex) {
+    final exact = _paragraphFirstPage[paragraphIndex];
+    if (exact != null) return (page1: exact + 1, exact: true);
+    if (_finished || pages.isEmpty) {
+      final last = pages.isEmpty ? 0 : pages.length - 1;
+      return (page1: last + 1, exact: _finished);
+    }
+    final totalParas = book.paragraphs.length;
+    final done = _nextParagraph.clamp(1, totalParas);
+    final avg = pages.length / done;
+    final est = (paragraphIndex * avg).floor();
+    final clamped = est.clamp(0, estimatedTotalPageCount - 1);
+    return (page1: clamped + 1, exact: false);
+  }
+
+  void _newPage() {
+    pages.add([]);
+    _usedHeight = 0;
+  }
+
+  void _remember(int paragraphIndex) {
+    _paragraphFirstPage.putIfAbsent(paragraphIndex, () => pages.length - 1);
+  }
+
+  void _paginateParagraph(int index) {
+    final availableHeight = _config.usableHeight;
+    final contentWidth = _config.contentWidth;
+    final source = book.paragraphs[index];
+    final hasImage = book.imageBytes[index] != null;
+    final hasBlockImage =
+        hasImage && ReaderMarkup.isStandaloneImageParagraph(source);
+    final hasLink = book.linkTargets[index] != null;
+    final imageHeight = hasBlockImage ? _contentSize.height * .36 + 12 : 0.0;
+    final linkHeight = hasLink ? 30.0 : 0.0;
+    final isTocEntry = book.tocEntries.any(
+      (entry) => entry.paragraphIndex == index,
+    );
+    final headingLevel = ReaderMarkup.effectiveHeadingLevel(
+      paragraph: source,
+      fullParagraph: source,
+      isTocEntry: isTocEntry,
+    );
+    final headingChrome = ReaderMarkup.headingChromeHeight(headingLevel);
+    if (headingLevel != null && headingLevel <= 2 && pages.last.isNotEmpty) {
+      _newPage();
+    }
+
+    if (source.isEmpty) {
+      final needed = imageHeight + linkHeight + headingChrome + 22;
+      if (_usedHeight + needed > availableHeight && pages.last.isNotEmpty) {
+        _newPage();
+      }
+      pages.last.add(
+        PageFragment(
+          paragraphIndex: index,
+          text: '',
+          showImage: hasImage,
+          showLinkAction: hasLink,
+        ),
+      );
+      _remember(index);
+      _usedHeight += needed;
+      return;
+    }
+
+    final plainSource = ReaderMarkup.stripAllMarkers(source);
+    // Headings are centered without first-line indent; body uses two spaces.
+    final isHeading = headingLevel != null;
+    final displaySource = plainSource.isEmpty
+        ? plainSource
+        : (isHeading ? plainSource : '　　$plainSource');
+    final measureStyle = isHeading
+        ? TextStyle(
+            fontFamily: _config.fontFamily,
+            fontSize: _config.fontSize * ReaderMarkup.headingFontScale(headingLevel!),
+            height: ReaderMarkup.headingLineHeight(headingLevel),
+            fontWeight: FontWeight.w700,
+          )
+        : _config.measureStyle;
+    final painter = TextPainter(
+      text: TextSpan(text: displaySource, style: measureStyle),
+      textDirection: TextDirection.ltr,
+    )..layout(maxWidth: contentWidth);
+    final lines = painter.computeLineMetrics();
+    var lineStart = 0;
+    var firstFragment = true;
+
+    for (var lineIndex = 0; lineIndex < lines.length;) {
+      final fragmentStart = lineStart;
+      var fragmentHeight = 0.0;
+      var fragmentEnd = lineStart;
+      final prefixHeight = firstFragment ? imageHeight + headingChrome : 0.0;
+
+      while (lineIndex < lines.length) {
+        final nextHeight = fragmentHeight + lines[lineIndex].height;
+        final isLastLine = lineIndex == lines.length - 1;
+        final suffixHeight = 22 + (isLastLine ? linkHeight : 0.0);
+        final wouldFit =
+            _usedHeight + prefixHeight + nextHeight + suffixHeight <=
+            availableHeight;
+        if (!wouldFit && fragmentEnd != fragmentStart) break;
+        fragmentHeight = nextHeight;
+        fragmentEnd = painter
+            .getPositionForOffset(
+              Offset(contentWidth, lines[lineIndex].baseline),
+            )
+            .offset;
+        lineIndex++;
+        if (!wouldFit ||
+            _usedHeight + prefixHeight + fragmentHeight + 22 >=
+                availableHeight) {
+          break;
+        }
+      }
+
+      if (fragmentEnd == fragmentStart) {
+        _newPage();
+        continue;
+      }
+
+      final isLastFragment = lineIndex == lines.length;
+      final needed =
+          prefixHeight +
+          fragmentHeight +
+          22 +
+          (isLastFragment ? linkHeight : 0.0);
+      if (_usedHeight + needed > availableHeight && pages.last.isNotEmpty) {
+        lineStart = fragmentStart;
+        final retryLine = lines.indexWhere(
+          (line) =>
+              painter
+                  .getPositionForOffset(Offset(contentWidth, line.baseline))
+                  .offset >
+              fragmentStart,
+        );
+        lineIndex = retryLine < 0 ? lineIndex : retryLine;
+        _newPage();
+        continue;
+      }
+
+      pages.last.add(
+        PageFragment(
+          paragraphIndex: index,
+          text: sliceDisplayText(plainSource, fragmentStart, fragmentEnd),
+          indentFirstLine: firstFragment,
+          showImage: firstFragment && hasImage,
+          showLinkAction: isLastFragment && hasLink,
+        ),
+      );
+      _remember(index);
+      _usedHeight += needed;
+      lineStart = fragmentEnd;
+      firstFragment = false;
+    }
+  }
 }
 
 double measureTitleHeight(PageLayoutConfig config) {
@@ -62,254 +322,4 @@ double measureTitleHeight(PageLayoutConfig config) {
     textDirection: TextDirection.ltr,
   )..layout(maxWidth: config.contentWidth);
   return painter.height;
-}
-
-List<List<PageFragment>> _exactPages(
-  ImportedBook book,
-  PageLayoutConfig config,
-) {
-  final size = Size(config.contentWidth, config.screenHeight);
-  final availableHeight = config.availableHeight;
-  final contentWidth = config.contentWidth;
-  final pages = <List<PageFragment>>[[]];
-  var usedHeight = measureTitleHeight(config) + 30;
-
-  void newPage() {
-    pages.add([]);
-    usedHeight = 0;
-  }
-
-  for (var index = 0; index < book.paragraphs.length; index++) {
-    final source = book.paragraphs[index];
-    final hasImage = book.imageBytes[index] != null;
-    final hasBlockImage =
-        hasImage && ReaderMarkup.isStandaloneImageParagraph(source);
-    final hasLink = book.linkTargets[index] != null;
-    final imageHeight = hasBlockImage ? size.height * .36 + 12 : 0.0;
-    final linkHeight = hasLink ? 30.0 : 0.0;
-    final headingLevel = int.tryParse(
-      ReaderMarkup.heading.firstMatch(source)?.group(1) ?? '',
-    );
-    if (headingLevel != null && headingLevel <= 2 && pages.last.isNotEmpty) {
-      newPage();
-    }
-
-    if (source.isEmpty) {
-      final needed = imageHeight + linkHeight + 22;
-      if (usedHeight + needed > availableHeight && pages.last.isNotEmpty) {
-        newPage();
-      }
-      pages.last.add(
-        PageFragment(
-          paragraphIndex: index,
-          text: '',
-          showImage: hasImage,
-          showLinkAction: hasLink,
-        ),
-      );
-      usedHeight += needed;
-      continue;
-    }
-
-    final plainSource = ReaderMarkup.stripAllMarkers(source);
-    final displaySource = plainSource.isEmpty
-        ? plainSource
-        : '　　$plainSource';
-    final painter = TextPainter(
-      text: TextSpan(text: displaySource, style: config.measureStyle),
-      textDirection: TextDirection.ltr,
-    )..layout(maxWidth: contentWidth);
-    final lines = painter.computeLineMetrics();
-    var lineStart = 0;
-    var firstFragment = true;
-
-    for (var lineIndex = 0; lineIndex < lines.length;) {
-      final fragmentStart = lineStart;
-      var fragmentHeight = 0.0;
-      var fragmentEnd = lineStart;
-      final prefixHeight = firstFragment ? imageHeight : 0.0;
-
-      while (lineIndex < lines.length) {
-        final nextHeight = fragmentHeight + lines[lineIndex].height;
-        final isLastLine = lineIndex == lines.length - 1;
-        final suffixHeight = 22 + (isLastLine ? linkHeight : 0.0);
-        final wouldFit =
-            usedHeight + prefixHeight + nextHeight + suffixHeight <=
-            availableHeight;
-        if (!wouldFit && fragmentEnd != fragmentStart) break;
-        fragmentHeight = nextHeight;
-        fragmentEnd = painter
-            .getPositionForOffset(
-              Offset(contentWidth, lines[lineIndex].baseline),
-            )
-            .offset;
-        lineIndex++;
-        if (!wouldFit ||
-            usedHeight + prefixHeight + fragmentHeight + 22 >= availableHeight) {
-          break;
-        }
-      }
-
-      if (fragmentEnd == fragmentStart) {
-        newPage();
-        continue;
-      }
-
-      final isLastFragment = lineIndex == lines.length;
-      final needed =
-          prefixHeight +
-          fragmentHeight +
-          22 +
-          (isLastFragment ? linkHeight : 0.0);
-      if (usedHeight + needed > availableHeight && pages.last.isNotEmpty) {
-        lineStart = fragmentStart;
-        final retryLine = lines.indexWhere(
-          (line) =>
-              painter
-                  .getPositionForOffset(Offset(contentWidth, line.baseline))
-                  .offset >
-              fragmentStart,
-        );
-        lineIndex = retryLine < 0 ? lineIndex : retryLine;
-        newPage();
-        continue;
-      }
-
-      pages.last.add(
-        PageFragment(
-          paragraphIndex: index,
-          text: sliceDisplayText(plainSource, fragmentStart, fragmentEnd),
-          indentFirstLine: firstFragment,
-          showImage: firstFragment && hasImage,
-          showLinkAction: isLastFragment && hasLink,
-        ),
-      );
-      usedHeight += needed;
-      lineStart = fragmentEnd;
-      firstFragment = false;
-    }
-  }
-  return pages;
-}
-
-List<List<PageFragment>> _estimateLargeBookPages(
-  ImportedBook book,
-  PageLayoutConfig config,
-) {
-  final availableHeight = config.availableHeight;
-  final lineHeight = config.lineHeight;
-  final guardedHeight = (availableHeight - 12).clamp(
-    lineHeight * 2,
-    availableHeight,
-  );
-  final avgCharWidth = _estimateAverageCharWidth(
-    book.paragraphs.take(40).join(),
-  );
-  final charsPerLine = (config.contentWidth / (config.fontSize * avgCharWidth))
-      .floor()
-      .clamp(8, 96);
-  final linesPerPage = (guardedHeight / lineHeight).floor().clamp(1, 80);
-  final imageReserveLines =
-      ((config.screenHeight * .36 + 16) / lineHeight).ceil() + 1;
-  final titleLines =
-      (measureTitleHeight(config) / lineHeight).ceil() + 1;
-  final regularCapacity = charsPerLine * linesPerPage;
-  final pages = <List<PageFragment>>[[]];
-  var used = titleLines;
-  for (var index = 0; index < book.paragraphs.length; index++) {
-    final source = book.paragraphs[index];
-    final hasImage = book.imageBytes[index] != null;
-    final hasBlockImage =
-        hasImage && ReaderMarkup.isStandaloneImageParagraph(source);
-    if (source.isEmpty && !hasBlockImage) continue;
-
-    var start = 0;
-    var firstPart = true;
-    do {
-      final imageLines = firstPart && hasBlockImage ? imageReserveLines : 0;
-      var availableLines = linesPerPage - used - imageLines;
-      if (availableLines <= 0 && pages.last.isNotEmpty) {
-        pages.add([]);
-        used = 0;
-        availableLines = linesPerPage - imageLines;
-      }
-      final indentChars = firstPart ? 2 : 0;
-      final capacity = (availableLines * charsPerLine - indentChars).clamp(
-        1,
-        regularCapacity,
-      );
-      final safeStart = start.clamp(0, source.length);
-      var safeEnd = source.isEmpty
-          ? 0
-          : _estimateBreakOffset(source, safeStart, capacity);
-      if (safeEnd < safeStart) safeEnd = safeStart;
-      if (safeEnd == safeStart && safeStart < source.length) {
-        safeEnd = (safeStart + 1).clamp(0, source.length);
-      }
-      final text = source.isEmpty
-          ? ''
-          : safeSubstring(source, safeStart, safeEnd);
-      final textLines = source.isEmpty
-          ? 0
-          : ((text.length + indentChars) / charsPerLine).ceil().clamp(
-              1,
-              availableLines,
-            );
-      final need = textLines + imageLines;
-      pages.last.add(
-        PageFragment(
-          paragraphIndex: index,
-          text: text,
-          indentFirstLine: firstPart,
-          showImage: firstPart && hasImage,
-          compactPadding: true,
-        ),
-      );
-      used += need;
-      start = safeEnd;
-      firstPart = false;
-    } while (start < source.length);
-  }
-  return pages;
-}
-
-double _estimateAverageCharWidth(String sample) {
-  if (sample.isEmpty) return .92;
-  var cjk = 0;
-  var latin = 0;
-  var spaces = 0;
-  for (final rune in sample.runes) {
-    if (rune == 0x20 || rune == 0x3000) {
-      spaces++;
-    } else if (rune >= 0x2E80 && rune <= 0x9FFF ||
-        rune >= 0xF900 && rune <= 0xFAFF ||
-        rune >= 0xFF00 && rune <= 0xFFEF) {
-      cjk++;
-    } else {
-      latin++;
-    }
-  }
-  final total = (cjk + latin + spaces).clamp(1, sample.length);
-  final weighted = cjk * 1.0 + latin * .52 + spaces * .3;
-  return (weighted / total).clamp(.45, 1.05);
-}
-
-int _estimateBreakOffset(String source, int start, int capacity) {
-  if (source.isEmpty || start >= source.length) return source.length;
-  final hardEnd = (start + capacity).clamp(start, source.length);
-  if (hardEnd >= source.length) return source.length;
-  final windowStart = start + (capacity * .82).floor();
-  for (var index = hardEnd; index > windowStart; index--) {
-    if (index - 1 < start || index - 1 >= source.length) continue;
-    final unit = source.codeUnitAt(index - 1);
-    if (unit == 0x3002 ||
-        unit == 0xFF01 ||
-        unit == 0xFF1F ||
-        unit == 0x21 ||
-        unit == 0x3F ||
-        unit == 0x2E) {
-      return index;
-    }
-  }
-  return hardEnd;
 }

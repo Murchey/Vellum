@@ -73,13 +73,11 @@ class ReaderStatusBar extends StatelessWidget {
   const ReaderStatusBar({
     required this.progressLabel,
     required this.batteryLabel,
-    this.sessionLabel,
     super.key,
   });
 
   final String progressLabel;
   final String batteryLabel;
-  final String? sessionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -103,18 +101,6 @@ class ReaderStatusBar extends StatelessWidget {
                   style: style,
                 ),
                 const Spacer(),
-                if (sessionLabel != null && sessionLabel!.isNotEmpty)
-                  Flexible(
-                    child: Text(
-                      sessionLabel!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.end,
-                      style: style,
-                    ),
-                  ),
-                if (sessionLabel != null && sessionLabel!.isNotEmpty)
-                  const SizedBox(width: 8),
                 Text(batteryLabel, maxLines: 1, style: style),
               ],
             ),
@@ -124,3 +110,4 @@ class ReaderStatusBar extends StatelessWidget {
     );
   }
 }
+

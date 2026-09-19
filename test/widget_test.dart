@@ -89,8 +89,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
+    expect(find.text('阅读数据'), findsOneWidget);
     expect(find.text('阅读统计'), findsOneWidget);
-    expect(find.text('今日阅读'), findsOneWidget);
 
     await tester.scrollUntilVisible(find.text('存储管理'), 200);
     expect(find.text('存储管理'), findsOneWidget);
@@ -539,7 +539,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.dragFrom(const Offset(400, 300), const Offset(400, 500));
+    // Quick vertical flick — long-press selection drags must not bookmark.
+    await tester.timedDragFrom(
+      const Offset(400, 300),
+      const Offset(0, 220),
+      const Duration(milliseconds: 80),
+    );
     await tester.pump();
 
     expect(find.text('书签已添加'), findsOneWidget);

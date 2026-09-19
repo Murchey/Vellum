@@ -38,6 +38,7 @@ class SnapPageScrollPhysics extends PageScrollPhysics {
 
 enum PageTurnStyle {
   cover('覆盖'),
+  slide('平移'),
   none('无动画');
 
   const PageTurnStyle(this.label);

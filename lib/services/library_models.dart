@@ -11,6 +11,48 @@ class FontPreferences {
   final String activeFont;
 }
 
+/// Global reader display preferences — shared across all books.
+class ReaderPreferences {
+  const ReaderPreferences({
+    this.fontSize = 19,
+    this.readerFontFamily = 'Georgia',
+    this.readerFontWeight = 'regular',
+    this.lineSpacing = 'comfortable',
+    this.backgroundValue,
+    this.mode = 'scroll',
+    this.pageTurn = 'cover',
+  });
+
+  final double fontSize;
+  final String readerFontFamily;
+  final String readerFontWeight;
+  final String lineSpacing;
+  final int? backgroundValue;
+  final String mode;
+  final String pageTurn;
+
+  Map<String, dynamic> toJson() => {
+    'fontSize': fontSize,
+    'readerFontFamily': readerFontFamily,
+    'readerFontWeight': readerFontWeight,
+    'lineSpacing': lineSpacing,
+    'backgroundValue': backgroundValue,
+    'mode': mode,
+    'pageTurn': pageTurn,
+  };
+
+  factory ReaderPreferences.fromJson(Map<String, dynamic> json) =>
+      ReaderPreferences(
+        fontSize: (json['fontSize'] as num?)?.toDouble() ?? 19,
+        readerFontFamily: json['readerFontFamily'] as String? ?? 'Georgia',
+        readerFontWeight: json['readerFontWeight'] as String? ?? 'regular',
+        lineSpacing: json['lineSpacing'] as String? ?? 'comfortable',
+        backgroundValue: (json['backgroundValue'] as num?)?.toInt(),
+        mode: json['mode'] as String? ?? 'scroll',
+        pageTurn: json['pageTurn'] as String? ?? 'cover',
+      );
+}
+
 class InstalledFont {
   const InstalledFont({
     required this.name,

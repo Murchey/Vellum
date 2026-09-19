@@ -1,5 +1,9 @@
 
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 
 import 'package:url_launcher/url_launcher.dart';
@@ -8,6 +12,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../services/book_library.dart';
 
+import '../services/notes_library.dart';
 import '../services/reading_stats.dart';
 import '../services/vellum_update_service.dart';
 
@@ -17,6 +22,7 @@ import '../theme/vellum_theme.dart';
 import 'font_manager_sheet.dart';
 
 import 'ebook_to_txt_page.dart';
+import 'reading_stats_page.dart';
 
 
 
@@ -117,6 +123,46 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadReadingStats() async {
     final stats = await _statsService.load();
     if (mounted) setState(() => _readingStats = stats);
+  }
+
+  Future<void> _exportNotes() async {
+    try {
+      const notesLibrary = NotesLibrary();
+      final notes = await notesLibrary.load();
+      if (!mounted) return;
+      if (notes.isEmpty) {
+        await _showUpdateDialog('暂无阅读笔记。长按正文选中文字后即可添加。');
+        return;
+      }
+      final bytes = Uint8List.fromList(
+        utf8.encode(
+          const JsonEncoder.withIndent('  ').convert([
+            for (final n in notes) n.toJson(),
+          ]),
+        ),
+      );
+      final suggested =
+          'vellum_notes_${DateTime.now().millisecondsSinceEpoch}.json';
+      final useSaf = Platform.isAndroid || Platform.isIOS;
+      final path = await FilePicker.platform.saveFile(
+        dialogTitle: '导出阅读笔记',
+        fileName: suggested,
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        bytes: useSaf ? bytes : null,
+      );
+      if (path == null || path.isEmpty || !mounted) return;
+      if (!useSaf) {
+        final file = File(path.endsWith('.json') ? path : '$path.json');
+        await notesLibrary.exportTo(file.path);
+        if (!mounted) return;
+        await _showUpdateDialog('已导出 ${notes.length} 条笔记到\n${file.path}');
+      } else {
+        await _showUpdateDialog('已导出 ${notes.length} 条笔记');
+      }
+    } catch (error) {
+      if (mounted) await _showUpdateDialog('导出笔记失败：$error');
+    }
   }
 
   Future<void> _loadUpdateRepo() async {
@@ -625,25 +671,33 @@ class _SettingsPageState extends State<SettingsPage> {
 
             CupertinoListSection.insetGrouped(
               backgroundColor: pageBackground,
-              header: const Text('阅读统计'),
+              header: const Text('阅读数据'),
               children: [
                 CupertinoListTile(
                   backgroundColor: pageBackground,
                   backgroundColorActivated: pressedBackground,
-                  leading: const Icon(CupertinoIcons.timer),
-                  title: const Text('今日阅读'),
+                  leading: const Icon(CupertinoIcons.chart_bar),
+                  title: const Text('阅读统计'),
                   additionalInfo: Text(
-                    ReadingStatsService.formatDuration(_readingStats.todaySeconds),
+                    '今日 ${ReadingStatsService.formatDuration(_readingStats.todaySeconds)}'
+                    ' · 累计 ${ReadingStatsService.formatDuration(_readingStats.totalSeconds)}',
                   ),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const ReadingStatsPage(),
+                      ),
+                    );
+                    await _loadReadingStats();
+                  },
                 ),
                 CupertinoListTile(
                   backgroundColor: pageBackground,
                   backgroundColorActivated: pressedBackground,
-                  leading: const Icon(CupertinoIcons.clock),
-                  title: const Text('累计阅读'),
-                  additionalInfo: Text(
-                    ReadingStatsService.formatDuration(_readingStats.totalSeconds),
-                  ),
+                  leading: const Icon(CupertinoIcons.doc_text),
+                  title: const Text('导出阅读笔记'),
+                  additionalInfo: const Text('JSON'),
+                  onTap: _exportNotes,
                 ),
               ],
             ),
