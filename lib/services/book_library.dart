@@ -8,50 +8,133 @@ import 'package:path_provider/path_provider.dart';
 import 'book_importer.dart';
 import 'font_storage.dart';
 import 'library_models.dart';
+import 'txt_catalog.dart';
+import 'txt_seek_source.dart';
 
 export 'font_storage.dart';
 export 'library_models.dart';
+export 'txt_catalog.dart' show TxtCatalog, TxtCatalogStatus, TxtChapterRef;
 
-Map<String, dynamic> _bookContentJson(ImportedBook book) => {
-  'id': book.storageId,
-  'title': book.title,
-  'format': book.format.name,
-  'paragraphs': book.paragraphs,
-  'linkTargets': book.linkTargets.map(
-    (source, target) => MapEntry(source.toString(), target),
-  ),
-  'tocEntries': book.tocEntries
-      .map(
-        (entry) => {
-          'title': entry.title,
-          'paragraphIndex': entry.paragraphIndex,
-        },
-      )
-      .toList(),
-  'imageBytes': book.imageBytes.map(
-    (index, bytes) => MapEntry(index.toString(), base64Encode(bytes)),
-  ),
-};
+/// Size of the JSON fragments streamed to disk by [writeBookContentJson].
+const _jsonChunkSize = 1 << 20;
+
+/// Streams one book's content JSON through [write] in ~1 MB chunks.
+///
+/// Hand-rolled instead of `jsonEncode` so a large book never has to exist as a
+/// single string, which keeps memory flat and lets the write start immediately.
+/// Key order and shape must stay in sync with [_decodeBookContent].
+void writeBookContentJson(
+  ImportedBook book,
+  void Function(String chunk) write,
+) {
+  final buffer = StringBuffer();
+
+  void flush({bool force = false}) {
+    if (buffer.isEmpty) return;
+    if (!force && buffer.length < _jsonChunkSize) return;
+    write(buffer.toString());
+    buffer.clear();
+  }
+
+  buffer
+    ..write('{"id":')
+    ..write(jsonEncode(book.storageId))
+    ..write(',"title":')
+    ..write(jsonEncode(book.title))
+    ..write(',"format":')
+    ..write(jsonEncode(book.format.name))
+    ..write(',"paragraphs":[');
+  var first = true;
+  for (final paragraph in book.paragraphs) {
+    if (first) {
+      first = false;
+    } else {
+      buffer.write(',');
+    }
+    buffer.write(jsonEncode(paragraph));
+    flush();
+  }
+  buffer.write('],"linkTargets":{');
+  first = true;
+  for (final entry in book.linkTargets.entries) {
+    if (first) {
+      first = false;
+    } else {
+      buffer.write(',');
+    }
+    buffer
+      ..write(jsonEncode(entry.key.toString()))
+      ..write(':')
+      ..write(entry.value.toString());
+  }
+  buffer.write('},"tocEntries":[');
+  first = true;
+  for (final entry in book.tocEntries) {
+    if (first) {
+      first = false;
+    } else {
+      buffer.write(',');
+    }
+    buffer
+      ..write('{"title":')
+      ..write(jsonEncode(entry.title))
+      ..write(',"paragraphIndex":')
+      ..write(entry.paragraphIndex.toString())
+      ..write('}');
+  }
+  buffer.write('],"imageBytes":{');
+  first = true;
+  for (final entry in book.imageBytes.entries) {
+    if (first) {
+      first = false;
+    } else {
+      buffer.write(',');
+    }
+    buffer
+      ..write(jsonEncode(entry.key.toString()))
+      ..write(':"')
+      ..write(base64Encode(entry.value))
+      ..write('"');
+    flush();
+  }
+  buffer.write('}}');
+  flush(force: true);
+}
 
 Map<String, dynamic> _bookIndexJson(ImportedBook book) => {
   'id': book.storageId,
   'title': book.title,
+  'author': book.author,
   'format': book.format.name,
   'paragraphCount': book.paragraphCount,
   'cover': book.coverBytes == null ? null : base64Encode(book.coverBytes!),
   'coverText': book.coverText,
   'folderId': book.folderId,
+  'contentMode': book.contentMode,
+  if (book.catalog != null) 'catalog': book.catalog!.toJson(),
 };
 
 String _encodeLibraryIndex(List<ImportedBook> books) =>
     jsonEncode([for (final book in books) _bookIndexJson(book)]);
 
-String _encodeBookContent(ImportedBook book) =>
-    jsonEncode(_bookContentJson(book));
+/// Isolate entry point: streams a book's content JSON straight into its file.
+Future<int> _writeBookContentFile(Map<String, dynamic> message) async {
+  final file = File(message['path'] as String);
+  final book = message['book'] as ImportedBook;
+  final sink = file.openWrite();
+  try {
+    writeBookContentJson(book, sink.write);
+    await sink.flush();
+  } finally {
+    await sink.close();
+  }
+  return file.lengthSync();
+}
 
 ImportedBook _decodeIndexEntry(Map<String, dynamic> data) => ImportedBook(
   id: data['id'] as String?,
   title: data['title'] as String,
+  author: data['author'] as String? ?? '',
   format: BookFormat.values.byName(data['format'] as String),
   paragraphs: const [],
   metaParagraphCount: (data['paragraphCount'] as num?)?.toInt() ?? 0,
@@ -60,6 +143,10 @@ ImportedBook _decodeIndexEntry(Map<String, dynamic> data) => ImportedBook(
       : Uint8List.fromList(base64Decode(data['cover'] as String)),
   coverText: data['coverText'] as String?,
   folderId: data['folderId'] as String?,
+  contentMode: data['contentMode'] as String? ?? 'inline',
+  catalog: data['catalog'] == null
+      ? null
+      : TxtCatalog.fromJson(data['catalog'] as Map<String, dynamic>),
 );
 
 ImportedBook _decodeBookContent(Map<String, dynamic> data) {
@@ -67,6 +154,7 @@ ImportedBook _decodeBookContent(Map<String, dynamic> data) {
   return ImportedBook(
     id: data['id'] as String?,
     title: data['title'] as String,
+    author: data['author'] as String? ?? '',
     format: BookFormat.values.byName(data['format'] as String),
     paragraphs: paragraphs,
     coverBytes: data['cover'] == null
@@ -122,10 +210,7 @@ class BookLibrary {
       ];
       final repaired = _ensureUniqueBookIds(books);
       if (!_sameBookIds(books, repaired)) {
-        await (await _file()).writeAsString(
-          await compute(_encodeLibraryIndex, repaired),
-          flush: true,
-        );
+        await saveIndex(repaired);
       }
       return repaired;
     } catch (_) {
@@ -167,6 +252,35 @@ class BookLibrary {
   }
 
   Future<ImportedBook> loadBookContent(ImportedBook book) async {
+    if (book.paragraphs is TxtParagraphList) return book;
+    if (book.hasContentLoaded && !book.usesSeek) return book;
+
+    // Seek-mode TXT: rebuild a paragraph list from catalog + source file.
+    if (book.contentMode == 'seek' || book.catalog != null) {
+      var catalog = book.catalog;
+      final catFile = await _bookCatalogFile(book.storageId);
+      if (catalog == null && await catFile.exists()) {
+        try {
+          catalog = TxtCatalog.fromJson(
+            jsonDecode(await catFile.readAsString()) as Map<String, dynamic>,
+          );
+        } catch (_) {}
+      }
+      final src = await _bookSourceFile(book.storageId);
+      if (catalog != null && await src.exists()) {
+        final source = TxtSeekSource(file: src, catalog: catalog);
+        return book.copyWith(
+          paragraphs: TxtParagraphList(source),
+          catalog: catalog,
+          contentMode: 'seek',
+          tocEntries: [
+            for (final entry in catalog.tocEntries)
+              BookTocEntry(title: entry.value, paragraphIndex: entry.key),
+          ],
+        );
+      }
+    }
+
     if (book.hasContentLoaded) return book;
     final file = await _bookContentFile(book.storageId);
     if (await file.exists()) {
@@ -207,10 +321,7 @@ class BookLibrary {
       next.insert(0, updated);
     }
     // Rewrite index without loading every book body.
-    await (await _file()).writeAsString(
-      await compute(_encodeLibraryIndex, next),
-      flush: true,
-    );
+    await saveIndex(next);
   }
 
   Future<List<LibraryFolder>> loadFolders() async {
@@ -268,10 +379,7 @@ class BookLibrary {
       for (final book in books)
         if (book.folderId == id) book.copyWith(clearFolder: true) else book,
     ];
-    await (await _file()).writeAsString(
-      await compute(_encodeLibraryIndex, next),
-      flush: true,
-    );
+    await saveIndex(next);
   }
 
   Future<void> setBookFolder(
@@ -289,10 +397,7 @@ class BookLibrary {
     if (!next.any((item) => item.storageId == updated.storageId)) {
       next.insert(0, updated);
     }
-    await (await _file()).writeAsString(
-      await compute(_encodeLibraryIndex, next),
-      flush: true,
-    );
+    await saveIndex(next);
   }
 
   Future<void> _writeFolders(List<LibraryFolder> folders) async {
@@ -321,6 +426,24 @@ class BookLibrary {
     await (await _updateRepoFile()).writeAsString(repository.trim(), flush: true);
   }
 
+  /// Whether entering the app should check for updates. On unless turned off.
+  Future<bool> loadAutoUpdateCheck() async {
+    final file = await _autoUpdateFile();
+    if (!await file.exists()) return true;
+    try {
+      return (await file.readAsString()).trim() != '0';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> saveAutoUpdateCheck(bool enabled) async {
+    await (await _autoUpdateFile()).writeAsString(
+      enabled ? '1' : '0',
+      flush: true,
+    );
+  }
+
   Future<void> save(List<ImportedBook> books) async {
     final directory = await _booksDir();
     if (!await directory.exists()) {
@@ -330,77 +453,115 @@ class BookLibrary {
     for (final book in books) {
       fullBooks.add(book.hasContentLoaded ? book : await loadBookContent(book));
     }
-    await Future.wait([
-      for (final book in fullBooks)
-        () async {
-          final file = await _bookContentFile(book.storageId);
-          final encoded = await compute(_encodeBookContent, book);
-          await file.writeAsString(encoded, flush: true);
-        }(),
-    ]);
-    final index = await compute(_encodeLibraryIndex, fullBooks);
+    await Future.wait([for (final book in fullBooks) saveBookContent(book)]);
+    await saveIndex(fullBooks);
+  }
+
+  /// Writes a single book's content file off the UI isolate.
+  ///
+  /// Import uses this instead of [save] so adding one book never re-encodes
+  /// the rest of the library.
+  ///
+  /// Seek-mode TXT books persist a raw source file + catalog sidecar instead
+  /// of a full paragraphs JSON (Fanqie keeps the original file and seeks).
+  Future<void> saveBookContent(ImportedBook book) async {
+    final dir = await _booksDir();
+    if (!await dir.exists()) await dir.create(recursive: true);
+
+    if (book.contentMode == 'seek') {
+      final src = await _bookSourceFile(book.storageId);
+      final paras = book.paragraphs;
+      if (paras is InMemoryTxtParagraphList) {
+        await src.writeAsBytes(paras.bytes, flush: true);
+      } else if (paras is TxtParagraphList) {
+        final existing = paras.source.file;
+        if (existing.path != src.path && await existing.exists()) {
+          await existing.copy(src.path);
+        }
+      }
+      final catalog = book.catalog;
+      if (catalog != null) {
+        final catFile = await _bookCatalogFile(book.storageId);
+        await catFile.writeAsString(
+          jsonEncode(catalog.toJson()),
+          flush: true,
+        );
+      }
+      return;
+    }
+
+    final file = await _bookContentFile(book.storageId);
+    final parent = file.parent;
+    if (!await parent.exists()) await parent.create(recursive: true);
+    await compute(_writeBookContentFile, <String, dynamic>{
+      'path': file.path,
+      'book': book,
+    });
+  }
+
+  /// Rewrites only the lightweight shelf index (titles, covers, counts).
+  Future<void> saveIndex(List<ImportedBook> books) async {
+    final index = await compute(_encodeLibraryIndex, books);
     await (await _file()).writeAsString(index, flush: true);
   }
 
   Future<void> deleteBook(ImportedBook book) async {
     final content = await _bookContentFile(book.storageId);
     if (await content.exists()) await content.delete();
+    final src = await _bookSourceFile(book.storageId);
+    if (await src.exists()) await src.delete();
+    final cat = await _bookCatalogFile(book.storageId);
+    if (await cat.exists()) await cat.delete();
   }
 
-  Future<ReadingState> loadReadingState(ImportedBook book) async {
-    final prefs = await loadReaderPreferences();
-    final file = await _stateFile();
-    if (!await file.exists()) {
-      return ReadingState(
-        fontSize: prefs.fontSize,
-        readerFontFamily: prefs.readerFontFamily,
-        readerFontWeight: prefs.readerFontWeight,
-        lineSpacing: prefs.lineSpacing,
-        backgroundValue: prefs.backgroundValue,
-        mode: prefs.mode,
-        pageTurn: prefs.pageTurn,
-      ).copyWith(bookId: book.storageId);
-    }
-    try {
-      final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-      final value = raw[_key(book)];
-      // Display settings are global; only progress/bookmarks stay per book.
-      if (value is! Map<String, dynamic>) {
-        return ReadingState(
-          fontSize: prefs.fontSize,
-          readerFontFamily: prefs.readerFontFamily,
-          readerFontWeight: prefs.readerFontWeight,
-          lineSpacing: prefs.lineSpacing,
-          backgroundValue: prefs.backgroundValue,
-          mode: prefs.mode,
-          pageTurn: prefs.pageTurn,
-        ).copyWith(bookId: book.storageId);
-      }
-      final saved = ReadingState.fromJson(value);
-      return ReadingState(
-        fontSize: prefs.fontSize,
-        readerFontFamily: prefs.readerFontFamily,
-        readerFontWeight: prefs.readerFontWeight,
-        lineSpacing: prefs.lineSpacing,
-        backgroundValue: prefs.backgroundValue,
-        mode: prefs.mode,
-        pageTurn: prefs.pageTurn,
+  /// Display settings that live in the shared preferences file.
+  ReadingState _displayState(ReaderPreferences prefs) => ReadingState(
+    fontSize: prefs.fontSize,
+    readerFontFamily: prefs.readerFontFamily,
+    readerFontWeight: prefs.readerFontWeight,
+    lineSpacing: prefs.lineSpacing,
+    backgroundValue: prefs.backgroundValue,
+    mode: prefs.mode,
+    pageTurn: prefs.pageTurn,
+    brightness: prefs.brightness,
+    eyeCare: prefs.eyeCare,
+    keepScreenOn: prefs.keepScreenOn,
+    volumeKeys: prefs.volumeKeys,
+  );
+
+  /// Display settings stay global; only progress and bookmarks are per book.
+  ReadingState _mergeProgress(ReadingState display, ReadingState saved) =>
+      ReadingState(
+        fontSize: display.fontSize,
+        readerFontFamily: display.readerFontFamily,
+        readerFontWeight: display.readerFontWeight,
+        lineSpacing: display.lineSpacing,
+        backgroundValue: display.backgroundValue,
+        mode: display.mode,
+        pageTurn: display.pageTurn,
+        brightness: display.brightness,
+        eyeCare: display.eyeCare,
+        keepScreenOn: display.keepScreenOn,
+        volumeKeys: display.volumeKeys,
         position: saved.position,
         page: saved.page,
         paragraphIndex: saved.paragraphIndex,
         bookmarks: saved.bookmarks,
-        bookId: book.storageId,
+        bookId: display.bookId,
       );
+
+  Future<ReadingState> loadReadingState(ImportedBook book) async {
+    final prefs = await loadReaderPreferences();
+    final display = _displayState(prefs).copyWith(bookId: book.storageId);
+    final file = await _stateFile();
+    if (!await file.exists()) return display;
+    try {
+      final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final value = raw[_key(book)];
+      if (value is! Map<String, dynamic>) return display;
+      return _mergeProgress(display, ReadingState.fromJson(value));
     } catch (_) {
-      return ReadingState(
-        fontSize: prefs.fontSize,
-        readerFontFamily: prefs.readerFontFamily,
-        readerFontWeight: prefs.readerFontWeight,
-        lineSpacing: prefs.lineSpacing,
-        backgroundValue: prefs.backgroundValue,
-        mode: prefs.mode,
-        pageTurn: prefs.pageTurn,
-      ).copyWith(bookId: book.storageId);
+      return display;
     }
   }
 
@@ -414,6 +575,10 @@ class BookLibrary {
         backgroundValue: state.backgroundValue,
         mode: state.mode,
         pageTurn: state.pageTurn,
+        brightness: state.brightness,
+        eyeCare: state.eyeCare,
+        keepScreenOn: state.keepScreenOn,
+        volumeKeys: state.volumeKeys,
       ),
     );
     final file = await _stateFile();
@@ -567,6 +732,20 @@ class BookLibrary {
     return File('${dir.path}${Platform.pathSeparator}$safe.json');
   }
 
+  /// Raw TXT source copy for seek-mode books.
+  Future<File> _bookSourceFile(String id) async {
+    final dir = await _booksDir();
+    final safe = id.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
+    return File('${dir.path}${Platform.pathSeparator}$safe.src');
+  }
+
+  /// Catalog sidecar (byte offsets) for seek-mode books.
+  Future<File> _bookCatalogFile(String id) async {
+    final dir = await _booksDir();
+    final safe = id.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
+    return File('${dir.path}${Platform.pathSeparator}$safe.catalog.json');
+  }
+
   Future<File> _file() async => File(
     '${(await getApplicationDocumentsDirectory()).path}${Platform.pathSeparator}vellum_library.json',
   );
@@ -590,6 +769,13 @@ class BookLibrary {
     final dir = await getApplicationDocumentsDirectory();
     return File(
       '${dir.path}${Platform.pathSeparator}vellum_update_repo.txt',
+    );
+  }
+
+  Future<File> _autoUpdateFile() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File(
+      '${dir.path}${Platform.pathSeparator}vellum_update_auto.txt',
     );
   }
 }

@@ -1,18 +1,24 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/physics.dart';
 
 enum ReadingMode { scroll, page }
 
 /// PagePhysics that settles on a page without a visible overscroll bounce.
 ///
-/// Default [PageScrollPhysics] uses a soft spring that overshoots, which
-/// reads as an unexpected rebound when the user chose "无动画".
+/// Tuned toward Fanqie's custom Scroller (`nt5/g.java`): friction is very low
+/// (≈0.01) and a fling can travel ~0.8 screen-heights, so the page *coasts*
+/// instead of stopping dead. Default [PageScrollPhysics] uses a soft spring
+/// that overshoots, which reads as an unexpected rebound; [SnapPageScrollPhysics]
+/// keeps the no-bounce settle but lets fast flicks carry further.
 class SnapPageScrollPhysics extends PageScrollPhysics {
   const SnapPageScrollPhysics({super.parent});
 
+  /// Critical damping: settle without bounce. Slightly softer than the old
+  /// stiffness:800 so a medium flick still travels a full page.
   @override
   SpringDescription get spring => SpringDescription.withDampingRatio(
     mass: 0.5,
-    stiffness: 800.0,
+    stiffness: 480.0,
     ratio: 1.0,
   );
 
@@ -31,6 +37,17 @@ class SnapPageScrollPhysics extends PageScrollPhysics {
     if (velocity.abs() < tolerance.velocity &&
         (position.pixels - targetPixels).abs() < 0.5) {
       return null;
+    }
+    // Fast flicks: coast toward the adjacent page with critical damping.
+    // Fanqie's low-friction fling lets a confident swipe clear a page; the
+    // default spring stops too early and feels "sticky".
+    final viewport = position.viewportDimension;
+    if (viewport > 0 && velocity.abs() > 700) {
+      final maxPage = position.maxScrollExtent / viewport;
+      final direction = velocity.sign;
+      final targetPage = (page + direction).clamp(0.0, maxPage);
+      final target = targetPage * viewport;
+      return SpringSimulation(spring, position.pixels, target, velocity);
     }
     return super.createBallisticSimulation(position, velocity);
   }
@@ -51,8 +68,17 @@ enum PageTurnStyle {
       );
 }
 
+/// Line-height presets for the reader surface.
+///
+/// Fanqie drives this through CSS `line-space` presets (0.35em / 0.5em /
+/// 0.68em / 1em on a 1.4 base) plus a custom clamp of 4.0–44.0px. Flutter's
+/// `TextStyle.height` is a font-size multiplier, so the presets below map the
+/// same feel onto multipliers: 超窄≈1.4+0.15, 窄≈1.4+0.3, 标准≈1.4+0.5,
+/// 宽松≈1.4+0.8. Legacy storage names (`comfortable`…) still resolve.
 enum ReaderLineSpacing {
-  compact('紧凑', 1.55),
+  xNarrow('超窄', 1.45),
+  narrow('窄', 1.7),
+  standard('标准', 1.9),
   comfortable('舒适', 1.9),
   relaxed('宽松', 2.2);
 
@@ -64,7 +90,30 @@ enum ReaderLineSpacing {
   static ReaderLineSpacing fromStorage(String value) =>
       ReaderLineSpacing.values.firstWhere(
         (spacing) => spacing.name == value,
-        orElse: () => ReaderLineSpacing.comfortable,
+        orElse: () => ReaderLineSpacing.standard,
+      );
+}
+
+/// Warm-tint overlay laid over the reading surface. [opacity] is the strength
+/// of the amber wash — enough to cut blue light without hiding the page.
+///
+/// Fanqie's eye-protect layer is a single overlay at alpha 0.15
+/// (`is_eye_protect_open`); `standard` matches that level.
+enum ReaderEyeCare {
+  off('关闭', 0),
+  soft('柔和', 0.10),
+  standard('标准', 0.15),
+  warm('暖黄', 0.20);
+
+  const ReaderEyeCare(this.label, this.opacity);
+
+  final String label;
+  final double opacity;
+
+  static ReaderEyeCare fromStorage(String value) =>
+      ReaderEyeCare.values.firstWhere(
+        (level) => level.name == value,
+        orElse: () => ReaderEyeCare.off,
       );
 }
 

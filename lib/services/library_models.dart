@@ -21,6 +21,10 @@ class ReaderPreferences {
     this.backgroundValue,
     this.mode = 'scroll',
     this.pageTurn = 'cover',
+    this.brightness = -1,
+    this.eyeCare = 'off',
+    this.keepScreenOn = true,
+    this.volumeKeys = false,
   });
 
   final double fontSize;
@@ -31,6 +35,18 @@ class ReaderPreferences {
   final String mode;
   final String pageTurn;
 
+  /// Screen brightness override, `-1` follows the system.
+  final double brightness;
+
+  /// `off` / `soft` / `warm` warm-tint overlay strength.
+  final String eyeCare;
+
+  /// Keep the screen awake while the reader is open.
+  final bool keepScreenOn;
+
+  /// Volume buttons turn pages while the reader is open.
+  final bool volumeKeys;
+
   Map<String, dynamic> toJson() => {
     'fontSize': fontSize,
     'readerFontFamily': readerFontFamily,
@@ -39,6 +55,10 @@ class ReaderPreferences {
     'backgroundValue': backgroundValue,
     'mode': mode,
     'pageTurn': pageTurn,
+    'brightness': brightness,
+    'eyeCare': eyeCare,
+    'keepScreenOn': keepScreenOn,
+    'volumeKeys': volumeKeys,
   };
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) =>
@@ -50,6 +70,10 @@ class ReaderPreferences {
         backgroundValue: (json['backgroundValue'] as num?)?.toInt(),
         mode: json['mode'] as String? ?? 'scroll',
         pageTurn: json['pageTurn'] as String? ?? 'cover',
+        brightness: (json['brightness'] as num?)?.toDouble() ?? -1,
+        eyeCare: json['eyeCare'] as String? ?? 'off',
+        keepScreenOn: json['keepScreenOn'] as bool? ?? true,
+        volumeKeys: json['volumeKeys'] as bool? ?? false,
       );
 }
 
@@ -85,6 +109,10 @@ class ReadingState {
     this.bookmarks = const [],
     this.pageTurn = 'cover',
     this.bookId = '',
+    this.brightness = -1,
+    this.eyeCare = 'off',
+    this.keepScreenOn = true,
+    this.volumeKeys = false,
   });
 
   final double fontSize;
@@ -104,6 +132,12 @@ class ReadingState {
   /// Storage id of the book this state belongs to.
   final String bookId;
 
+  /// Screen brightness override, `-1` follows the system.
+  final double brightness;
+  final String eyeCare;
+  final bool keepScreenOn;
+  final bool volumeKeys;
+
   ReadingState copyWith({String? bookId}) => ReadingState(
     fontSize: fontSize,
     readerFontFamily: readerFontFamily,
@@ -117,6 +151,10 @@ class ReadingState {
     bookmarks: bookmarks,
     pageTurn: pageTurn,
     bookId: bookId ?? this.bookId,
+    brightness: brightness,
+    eyeCare: eyeCare,
+    keepScreenOn: keepScreenOn,
+    volumeKeys: volumeKeys,
   );
 
   Map<String, dynamic> toJson() => {
@@ -132,6 +170,10 @@ class ReadingState {
     'bookmarks': bookmarks,
     'pageTurn': pageTurn,
     'bookId': bookId,
+    'brightness': brightness,
+    'eyeCare': eyeCare,
+    'keepScreenOn': keepScreenOn,
+    'volumeKeys': volumeKeys,
   };
 
   factory ReadingState.fromJson(Map<String, dynamic> json) => ReadingState(
@@ -150,6 +192,10 @@ class ReadingState {
         .toList(),
     pageTurn: json['pageTurn'] as String? ?? 'cover',
     bookId: json['bookId'] as String? ?? '',
+    brightness: (json['brightness'] as num?)?.toDouble() ?? -1,
+    eyeCare: json['eyeCare'] as String? ?? 'off',
+    keepScreenOn: json['keepScreenOn'] as bool? ?? true,
+    volumeKeys: json['volumeKeys'] as bool? ?? false,
   );
 }
 

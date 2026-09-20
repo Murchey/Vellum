@@ -24,6 +24,9 @@ class EpubDecoder {
       final opf = fileText(archive, packagePath);
       final title =
           elementText(opf, 'dc:title') ?? pipeline.titleFromFilename(filename);
+      // Fanqie's EpubMetaData carries mCreator; without it the shelf has no
+      // author line to show.
+      final author = _cleanMeta(elementText(opf, 'dc:creator') ?? '');
       final manifest = <String, _ManifestItem>{};
       for (final match in RegExp(
         r'<item\b[^>]*/?>',
@@ -42,7 +45,18 @@ class EpubDecoder {
       final slash = packagePath.lastIndexOf('/');
       final opfDir = slash < 0 ? '' : packagePath.substring(0, slash + 1);
 
+      // Cover: Fanqie extracts one via TTEPubParser.b(path). EPUB declares it
+      // three common ways — try them in order of certainty.
+      final coverBytes = _extractCover(
+        archive: archive,
+        opf: opf,
+        opfDir: opfDir,
+        manifest: manifest,
+      );
+
       final contents = <_SpineDocument>[];
+      final imageByIndex = <int, String>{};
+      var nextImageIndex = 1;
       for (final match in RegExp(
         r'<itemref\b[^>]*/?>',
         caseSensitive: false,
@@ -54,10 +68,28 @@ class EpubDecoder {
         if (href == null) continue;
         final raw = _tryFileText(archive, href);
         if (raw == null) continue;
+        // Rewrite <img src="…"> to recindex so the shared HTML pipeline
+        // records image anchors; the archive bytes are resolved below.
+        final docDir = _dirOf(href);
+        final rewritten = raw.replaceAllMapped(
+          RegExp(
+            r'''<img\b[^>]*?\bsrc\s*=\s*["']([^"']+)["'][^>]*>''',
+            caseSensitive: false,
+          ),
+          (img) {
+            final src = img.group(1)!.trim();
+            if (src.isEmpty || src.startsWith('data:')) return img.group(0)!;
+            final resolved = _normalizePath(docDir, src);
+            if (resolved == null) return img.group(0)!;
+            final index = nextImageIndex++;
+            imageByIndex[index] = resolved;
+            return '<img recindex="$index">';
+          },
+        );
         contents.add(
           _SpineDocument(
             path: href,
-            content: pipeline.convert(raw, href),
+            content: pipeline.convert(rewritten, href),
           ),
         );
       }
@@ -69,6 +101,7 @@ class EpubDecoder {
       final anchors = <String, int>{};
       final documentStart = <String, int>{};
       final unresolvedLinks = <int, String>{};
+      final paragraphImages = <int, int>{};
       for (final doc in contents) {
         final offset = paragraphs.length;
         documentStart[doc.path] = offset;
@@ -79,6 +112,9 @@ class EpubDecoder {
         for (final entry in doc.content.links.entries) {
           unresolvedLinks[offset + entry.key] = entry.value;
         }
+        for (final entry in doc.content.images.entries) {
+          paragraphImages[offset + entry.key] = entry.value;
+        }
       }
       final linkTargets = <int, int>{
         for (final entry in unresolvedLinks.entries)
@@ -86,6 +122,17 @@ class EpubDecoder {
       };
       if (paragraphs.isEmpty) {
         throw const BookImportException('EPUB 中没有可阅读的正文。');
+      }
+
+      final imageBytes = <int, Uint8List>{};
+      for (final entry in paragraphImages.entries) {
+        final path = imageByIndex[entry.value];
+        if (path == null) continue;
+        final file = archive.findFile(path);
+        final data = file?.readBytes();
+        if (data == null || data.isEmpty) continue;
+        if (!_looksLikeImage(data)) continue;
+        imageBytes[entry.key] = Uint8List.fromList(data);
       }
 
       final tocEntries = _parseToc(
@@ -101,16 +148,101 @@ class EpubDecoder {
 
       return ImportedBook(
         title: title,
+        author: author,
         format: BookFormat.epub,
         paragraphs: paragraphs,
+        coverBytes: coverBytes,
         linkTargets: linkTargets,
         tocEntries: tocEntries,
+        imageBytes: imageBytes,
       );
     } on BookImportException {
       rethrow;
     } catch (_) {
       throw const BookImportException('无法读取此 EPUB 文件。');
     }
+  }
+
+  String _cleanMeta(String value) {
+    final cleaned = pipeline.chapterTitle(value);
+    if (cleaned.isEmpty) return '';
+    // Strip role suffixes some producers append: "作者 (Author)" → "作者".
+    final paren = cleaned.indexOf('(');
+    if (paren > 1 && cleaned.endsWith(')')) {
+      return cleaned.substring(0, paren).trim();
+    }
+    return cleaned;
+  }
+
+  Uint8List? _extractCover({
+    required Archive archive,
+    required String opf,
+    required String opfDir,
+    required Map<String, _ManifestItem> manifest,
+  }) {
+    // 1) <meta name="cover" content="manifest-id"/> (EPUB2 convention)
+    final metaCoverId = RegExp(
+      r'''<meta\b[^>]*\bname\s*=\s*["']cover["'][^>]*\bcontent\s*=\s*["']([^"']+)["']''',
+      caseSensitive: false,
+    ).firstMatch(opf)?.group(1);
+    final metaCoverIdAlt = RegExp(
+      r'''<meta\b[^>]*\bcontent\s*=\s*["']([^"']+)["'][^>]*\bname\s*=\s*["']cover["']''',
+      caseSensitive: false,
+    ).firstMatch(opf)?.group(1);
+    // 2) manifest properties="cover-image" (EPUB3)
+    String? propertiesHref;
+    String? firstImageHref;
+    for (final item in manifest.values) {
+      final props = item.properties.toLowerCase().split(RegExp(r'\s+'));
+      if (props.contains('cover-image')) {
+        propertiesHref = item.href;
+      }
+      if (firstImageHref == null &&
+          item.mediaType.toLowerCase().startsWith('image/')) {
+        firstImageHref = item.href;
+      }
+    }
+    final candidates = <String?>[
+      manifest[metaCoverId]?.href,
+      manifest[metaCoverIdAlt]?.href,
+      propertiesHref,
+      // href heuristic: a file named cover.*
+      for (final item in manifest.values)
+        if (item.mediaType.toLowerCase().startsWith('image/') &&
+            RegExp(r'cover', caseSensitive: false).hasMatch(item.href))
+          item.href,
+      firstImageHref,
+    ];
+    for (final href in candidates) {
+      if (href == null) continue;
+      final path = _normalizePath(opfDir, href);
+      if (path == null) continue;
+      final file = archive.findFile(path);
+      final data = file?.readBytes();
+      if (data == null || data.isEmpty) continue;
+      if (!_looksLikeImage(data)) continue;
+      return Uint8List.fromList(data);
+    }
+    return null;
+  }
+
+  bool _looksLikeImage(List<int> data) {
+    if (data.length < 4) return false;
+    // JPEG
+    if (data[0] == 0xff && data[1] == 0xd8) return true;
+    // PNG
+    if (data[0] == 0x89 && data[1] == 0x50) return true;
+    // GIF
+    if (data[0] == 0x47 && data[1] == 0x49) return true;
+    // WEBP (RIFF....WEBP)
+    if (data.length >= 12 &&
+        data[0] == 0x52 &&
+        data[1] == 0x49 &&
+        data[8] == 0x57 &&
+        data[9] == 0x45) {
+      return true;
+    }
+    return false;
   }
 
   List<BookTocEntry> _parseToc({
@@ -199,9 +331,7 @@ class EpubDecoder {
         caseSensitive: false,
       ).allMatches(before).toList();
       if (labelMatches.isEmpty) continue;
-      final title = _decodeEntities(
-        labelMatches.last.group(1)!.replaceAll(RegExp(r'<[^>]+>'), ''),
-      ).trim();
+      final title = pipeline.chapterTitle(labelMatches.last.group(1)!);
       if (title.isEmpty) continue;
       items.add(_RawTocItem(title: title, href: src, baseDir: dir));
     }
@@ -226,7 +356,7 @@ class EpubDecoder {
     if (tocRoot == null) return items;
     for (final anchor in tocRoot.querySelectorAll('a')) {
       final href = anchor.attributes['href']?.trim();
-      final title = anchor.text.trim();
+      final title = pipeline.chapterTitle(anchor.text);
       if (href == null || href.isEmpty || title.isEmpty) continue;
       items.add(_RawTocItem(title: title, href: href, baseDir: dir));
     }

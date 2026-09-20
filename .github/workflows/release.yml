@@ -87,11 +87,31 @@ jobs:
         if: ${{ github.event.inputs.skip_tests != 'true' }}
         run: flutter test
 
-      - name: Build APK
+      - name: Build APKs
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
         run: |
+          set -euo pipefail
+          apk_dir=build/app/outputs/flutter-apk
+          mkdir -p dist
+
+          # Per-ABI builds first: the in-app updater picks one of these, and the
+          # file names must stay `Vellum-V<version>-<abi>.apk`.
           flutter build apk --release \
-            --build-name=${{ steps.meta.outputs.version }} \
+            --build-name="$VERSION" \
+            --build-number=${{ github.run_number }} \
+            --split-per-abi
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            cp "$apk_dir/app-${abi}-release.apk" "dist/Vellum-V${VERSION}-${abi}.apk"
+          done
+
+          # Universal build as a fallback for devices we cannot identify.
+          flutter build apk --release \
+            --build-name="$VERSION" \
             --build-number=${{ github.run_number }}
+          cp "$apk_dir/app-release.apk" "dist/Vellum-V${VERSION}-universal.apk"
+
+          ls -l dist
 
       - name: Build App Bundle
         run: |
@@ -130,17 +150,17 @@ jobs:
           if [ "$PRERELEASE" = "true" ]; then
             prerelease_flag="--prerelease"
           fi
-          notes="Vellum ${VERSION}"
+          notes=$(printf 'Vellum %s\n\nAPK 按机型架构区分，装错会提示「应用未安装」：\n- Vellum-V%s-arm64-v8a.apk：绝大多数手机，推荐\n- Vellum-V%s-armeabi-v7a.apk：较老的 32 位机型\n- Vellum-V%s-x86_64.apk：x86 平板 / 模拟器\n- Vellum-V%s-universal.apk：不确定时用这个，体积更大\n\n应用内更新会自动识别本机架构并推荐对应安装包。' "$VERSION" "$VERSION" "$VERSION" "$VERSION" "$VERSION")
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — uploading assets."
             gh release upload "$TAG" \
-              build/app/outputs/flutter-apk/app-release.apk \
+              dist/*.apk \
               build/app/outputs/bundle/release/app-release.aab \
               --clobber
           else
             gh release create "$TAG" \
-              build/app/outputs/flutter-apk/app-release.apk \
+              dist/*.apk \
               build/app/outputs/bundle/release/app-release.aab \
               --title "$TAG" \
               --notes "$notes" \
@@ -152,6 +172,6 @@ jobs:
         with:
           name: vellum-${{ steps.meta.outputs.tag }}
           path: |
-            build/app/outputs/flutter-apk/app-release.apk
+            dist/*.apk
             build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error

@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../services/writing_library.dart';
 import '../theme/vellum_theme.dart';
+import '../widgets/markdown_preview.dart';
 
 /// Writing tab: list of local drafts, open editor to write .md / .txt.
 class WritingPage extends StatefulWidget {
@@ -334,6 +335,11 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
   bool _saving = false;
   bool _dirty = false;
 
+  /// Markdown drafts can be flipped to a rendered preview.
+  bool _previewing = false;
+
+  bool get _canPreview => _format == WritingFormat.md;
+
   @override
   void initState() {
     super.initState();
@@ -475,6 +481,22 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
     if (mounted) Navigator.pop(context);
   }
 
+  void _togglePreview() {
+    if (!_canPreview) return;
+    if (!_previewing) FocusScope.of(context).unfocus();
+    setState(() => _previewing = !_previewing);
+  }
+
+  void _setFormat(WritingFormat value) {
+    if (value == _format) return;
+    setState(() {
+      _format = value;
+      // Plain text has nothing to render.
+      if (value != WritingFormat.md) _previewing = false;
+    });
+    _markDirty();
+  }
+
   @override
   Widget build(BuildContext context) {
     final muted = VellumTheme.mutedOf(context);
@@ -539,17 +561,66 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-              child: CupertinoSlidingSegmentedControl<WritingFormat>(
-                groupValue: _format,
-                children: {
-                  for (final format in WritingFormat.values)
-                    format: Text(format.label),
-                },
-                onValueChanged: (value) {
-                  if (value == null || value == _format) return;
-                  setState(() => _format = value);
-                  _markDirty();
-                },
+              child: Row(
+                children: [
+                  Expanded(
+                    child: CupertinoSlidingSegmentedControl<WritingFormat>(
+                      groupValue: _format,
+                      children: {
+                        for (final format in WritingFormat.values)
+                          format: Text(format.label),
+                      },
+                      onValueChanged: (value) {
+                        if (value != null) _setFormat(value);
+                      },
+                    ),
+                  ),
+                  if (_canPreview) ...[
+                    const SizedBox(width: 10),
+                    CupertinoButton(
+                      padding: EdgeInsets.zero,
+                      onPressed: _togglePreview,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _previewing
+                              ? VellumTheme.softAccentOf(context)
+                              : VellumTheme.cardOf(context),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: _previewing
+                                ? accent
+                                : VellumTheme.lineOf(context),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _previewing
+                                  ? CupertinoIcons.pencil
+                                  : CupertinoIcons.eye,
+                              size: 16,
+                              color: _previewing ? accent : muted,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              _previewing ? '编辑' : '预览',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _previewing ? accent : ink,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             Padding(
@@ -570,18 +641,20 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
             ),
             Container(height: 1, color: VellumTheme.lineOf(context)),
             Expanded(
-              child: CupertinoTextField(
-                controller: _bodyController,
-                placeholder: '开始写下……\n支持 Markdown，导出时按所选格式保存。',
-                placeholderStyle: TextStyle(color: muted, height: 1.5),
-                maxLines: null,
-                expands: true,
-                textAlignVertical: TextAlignVertical.top,
-                keyboardType: TextInputType.multiline,
-                style: TextStyle(color: ink, fontSize: 16, height: 1.65),
-                decoration: const BoxDecoration(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              ),
+              child: _previewing
+                  ? MarkdownPreview(source: _bodyController.text)
+                  : CupertinoTextField(
+                      controller: _bodyController,
+                      placeholder: '开始写下……\n支持 Markdown，导出时按所选格式保存。',
+                      placeholderStyle: TextStyle(color: muted, height: 1.5),
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      keyboardType: TextInputType.multiline,
+                      style: TextStyle(color: ink, fontSize: 16, height: 1.65),
+                      decoration: const BoxDecoration(),
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                    ),
             ),
             Container(
               width: double.infinity,

@@ -2,16 +2,23 @@ import 'package:flutter/cupertino.dart';
 
 import '../theme/vellum_theme.dart';
 
-/// Top chrome: back + title only. Progress lives on the bottom seek bar.
+/// Top chrome: back + title + bookmark toggle. Progress lives on the bottom
+/// seek bar.
 class ReaderHeaderPanel extends StatelessWidget {
   const ReaderHeaderPanel({
     required this.title,
     this.onBack,
+    this.bookmarked = false,
+    this.onToggleBookmark,
     super.key,
   });
 
   final String title;
   final VoidCallback? onBack;
+
+  /// Whether the current page/position already has a bookmark.
+  final bool bookmarked;
+  final VoidCallback? onToggleBookmark;
 
   @override
   Widget build(BuildContext context) => SafeArea(
@@ -59,7 +66,21 @@ class ReaderHeaderPanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                if (onToggleBookmark != null)
+                  CupertinoButton(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(40, 40),
+                    onPressed: onToggleBookmark,
+                    child: Icon(
+                      bookmarked ? CupertinoIcons.bookmark_fill : CupertinoIcons.bookmark,
+                      size: 19,
+                      color: bookmarked
+                          ? VellumTheme.accentOf(context)
+                          : VellumTheme.mutedOf(context),
+                    ),
+                  )
+                else
+                  const SizedBox(width: 8),
               ],
             ),
           ),
@@ -73,16 +94,30 @@ class ReaderStatusBar extends StatelessWidget {
   const ReaderStatusBar({
     required this.progressLabel,
     required this.batteryLabel,
+    this.chapterLabel = '',
+    this.remainingLabel = '',
     super.key,
   });
 
   final String progressLabel;
   final String batteryLabel;
 
+  /// `第 12 章 夜雨 · 本章 38%`, empty when the book has no chapters.
+  final String chapterLabel;
+
+  /// `剩余约 12 分钟`, empty when it cannot be estimated yet.
+  final String remainingLabel;
+
   @override
   Widget build(BuildContext context) {
     final muted = VellumTheme.mutedOf(context).withValues(alpha: .82);
     final style = TextStyle(color: muted, fontSize: 11);
+    final detail = [
+      if (progressLabel.isNotEmpty) progressLabel,
+      if (remainingLabel.isNotEmpty) remainingLabel,
+      batteryLabel,
+    ].join(' · ');
+
     return IgnorePointer(
       // Parent SafeArea already handles system insets.
       child: Align(
@@ -92,16 +127,26 @@ class ReaderStatusBar extends StatelessWidget {
           child: MediaQuery.withClampedTextScaling(
             minScaleFactor: 1,
             maxScaleFactor: 1.1,
-            child: Row(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                if (chapterLabel.isNotEmpty)
+                  Text(
+                    chapterLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: style,
+                  ),
                 Text(
-                  progressLabel,
+                  detail,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
+                  textAlign: chapterLabel.isEmpty
+                      ? TextAlign.start
+                      : TextAlign.right,
                   style: style,
                 ),
-                const Spacer(),
-                Text(batteryLabel, maxLines: 1, style: style),
               ],
             ),
           ),

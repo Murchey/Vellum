@@ -17,6 +17,7 @@ import 'reader_markup.dart';
 import 'reader_models.dart';
 import 'reader_pagination.dart';
 import 'reader_paragraph.dart';
+import 'reader_platform.dart';
 import 'reader_selection.dart';
 import 'reader_toc.dart';
 
@@ -82,6 +83,32 @@ class _ReaderPageState extends State<ReaderPage>
   bool _scrollPositionRestored = false;
   bool _pagePositionRestored = false;
   int _scrollRestoreAttempts = 0;
+  late double _brightness;
+  late ReaderEyeCare _eyeCare;
+  late bool _keepScreenOn;
+  late bool _volumeKeys;
+  final _platform = const ReaderPlatform();
+
+  /// Highlights and notes for this book, newest first, plus a paragraph-keyed
+  /// view so rendering never scans the whole list.
+  List<ReadingNote> _notes = const [];
+  Map<int, List<String>> _highlights = const {};
+
+  /// Chapter entries are scanned once: the footer needs them on every frame.
+  late final List<MapEntry<int, String>> _chapters = chapterEntries(
+    widget.book,
+  );
+
+  /// Table-of-contents paragraph indexes, for heading detection in O(1).
+  late final Set<int> _tocParagraphs = {
+    for (final entry in widget.book.tocEntries) entry.paragraphIndex,
+  };
+
+  /// Character count of the whole book, used for the remaining-time estimate.
+  late final int _totalChars = _countChars();
+
+  /// Order-of-magnitude reading pace for Chinese prose (characters / minute).
+  static const int _charsPerMinute = 500;
 
   final _statsService = const ReadingStatsService();
   final _sessionSeconds = ValueNotifier<int>(0);
@@ -109,6 +136,10 @@ class _ReaderPageState extends State<ReaderPage>
         ? ReadingMode.page
         : ReadingMode.scroll;
     _pageTurnStyle = PageTurnStyle.fromStorage(widget.initialState.pageTurn);
+    _brightness = widget.initialState.brightness;
+    _eyeCare = ReaderEyeCare.fromStorage(widget.initialState.eyeCare);
+    _keepScreenOn = widget.initialState.keepScreenOn;
+    _volumeKeys = widget.initialState.volumeKeys;
     _pager = ProgressiveBookPager(widget.book, const PageLayoutConfig(
       fontSize: 19,
       lineSpacing: ReaderLineSpacing.comfortable,
@@ -121,7 +152,9 @@ class _ReaderPageState extends State<ReaderPage>
     ));
     _coverAnim = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 240),
+      // Fanqie's page-turn animation is short enough to feel immediate; a
+      // 240ms ease-in-out reads as "waiting for the app" instead of turning.
+      duration: const Duration(milliseconds: 200),
     );
     _scrollController = ScrollController()
       ..addListener(() {
@@ -142,6 +175,109 @@ class _ReaderPageState extends State<ReaderPage>
     _loadBatteryLevel();
     _startReadingTimer();
     _loadTodayReading();
+    _loadNotes();
+    _syncPlatformSettings();
+  }
+
+  /// Screen brightness / keep-awake / volume-key paging are window-level
+  /// settings on Android, so they follow the reader's lifetime.
+  Future<void> _syncPlatformSettings() async {
+    await _platform.setBrightness(_brightness);
+    await _platform.setKeepScreenOn(_keepScreenOn);
+    await _syncVolumeKeys();
+  }
+
+  Future<void> _syncVolumeKeys() async {
+    await _platform.setVolumeKeyPaging(_volumeKeys);
+    _platform.listenForVolumeKeys(_volumeKeys ? _handleVolumeKey : null);
+  }
+
+  DateTime? _lastVolumeTurn;
+
+  void _handleVolumeKey(int direction) {
+    if (!mounted || !_volumeKeys) return;
+    // Fanqie throttles volume-key paging to 300 ms so a held key does not
+    // flip dozens of pages.
+    final now = DateTime.now();
+    final last = _lastVolumeTurn;
+    if (last != null &&
+        now.difference(last) < ReaderGestures.volumeKeyThrottle) {
+      return;
+    }
+    _lastVolumeTurn = now;
+    if (_readingMode == ReadingMode.page) {
+      _changePage(context, direction);
+      return;
+    }
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (!position.hasPixels || !position.haveDimensions) return;
+    final delta = position.viewportDimension * .9 * direction;
+    _scrollController.jumpTo(
+      (_scrollController.offset + delta).clamp(0.0, position.maxScrollExtent),
+    );
+    _scheduleSave();
+  }
+
+  int _countChars() {
+    // TXT seek-mode books expose an O(1) catalog total; others iterate once.
+    return widget.book.totalCharCount;
+  }
+
+  Future<void> _loadNotes() async {
+    final notes = await _notesLibrary.loadForBook(_bookId);
+    if (!mounted) return;
+    setState(() {
+      _notes = notes;
+      _highlights = _groupHighlights(notes);
+    });
+  }
+
+  Map<int, List<String>> _groupHighlights(List<ReadingNote> notes) {
+    final map = <int, List<String>>{};
+    for (final note in notes) {
+      if (note.selectedText.isEmpty) continue;
+      (map[note.paragraphIndex] ??= []).add(note.selectedText);
+    }
+    return map;
+  }
+
+  /// Toggles a highlight for the selected passage — selecting it again removes
+  /// it, which is how the reader-style apps behave.
+  Future<void> _toggleHighlight(String selected, int paragraphIndex) async {
+    final value = selected.trim();
+    if (value.isEmpty) return;
+    final existing = [
+      for (final note in _notes)
+        if (note.paragraphIndex == paragraphIndex && note.selectedText == value)
+          note,
+    ];
+    if (existing.isNotEmpty) {
+      await _notesLibrary.delete(existing.first.id);
+      if (mounted) _showBookmarkNotice('已取消划线');
+    } else {
+      await _notesLibrary.add(
+        bookId: _bookId,
+        bookTitle: widget.book.title,
+        paragraphIndex: paragraphIndex,
+        selectedText: value,
+        style: ReadingNoteStyle.highlight,
+      );
+      if (mounted) _showBookmarkNotice('已划线，可在目录的「笔记」里查看');
+    }
+    await _loadNotes();
+  }
+
+  Future<void> _removeNote(String id) async {
+    await _notesLibrary.delete(id);
+    if (!mounted) return;
+    setState(() {
+      _notes = [
+        for (final note in _notes)
+          if (note.id != id) note,
+      ];
+      _highlights = _groupHighlights(_notes);
+    });
   }
 
   String get _bookId => widget.book.storageId;
@@ -267,6 +403,11 @@ class _ReaderPageState extends State<ReaderPage>
     _saveTimer?.cancel();
     _bookmarkNoticeTimer?.cancel();
     _saveState();
+    // Release the window-level reader settings.
+    _platform.listenForVolumeKeys(null);
+    _platform.setBrightness(-1);
+    _platform.setKeepScreenOn(false);
+    _platform.setVolumeKeyPaging(false);
     _coverAnim.dispose();
     _scrollController.dispose();
     _pageController.dispose();
@@ -372,6 +513,10 @@ class _ReaderPageState extends State<ReaderPage>
       bookmarks: List<int>.unmodifiable(_bookmarks),
       pageTurn: _pageTurnStyle.name,
       bookId: _bookId,
+      brightness: _brightness,
+      eyeCare: _eyeCare.name,
+      keepScreenOn: _keepScreenOn,
+      volumeKeys: _volumeKeys,
     );
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
@@ -575,9 +720,8 @@ class _ReaderPageState extends State<ReaderPage>
   }
 
   Map<int, String> _chapterPageLabels() {
-    final entries = _chapterEntries();
     final labels = <int, String>{};
-    for (final entry in entries) {
+    for (final entry in _chapters) {
       final ref = _pager.pageRefForParagraph(entry.key);
       labels[entry.key] = ref.exact
           ? '第 ${ref.page1} 页'
@@ -586,7 +730,55 @@ class _ReaderPageState extends State<ReaderPage>
     return labels;
   }
 
-  List<MapEntry<int, String>> _chapterEntries() => chapterEntries(widget.book);
+  List<MapEntry<int, String>> _chapterEntries() => _chapters;
+
+  /// Index of the chapter containing [paragraph], or -1 when before the first.
+  int _chapterIndexFor(int paragraph) {
+    var low = 0;
+    var high = _chapters.length - 1;
+    var found = -1;
+    while (low <= high) {
+      final mid = (low + high) ~/ 2;
+      if (_chapters[mid].key <= paragraph) {
+        found = mid;
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return found;
+  }
+
+  /// `第一章 夜雨 · 本章 38%` — the footer's chapter context line.
+  String get _chapterLabel {
+    if (_chapters.isEmpty) return '';
+    final index = _chapterIndexFor(_activeParagraph);
+    if (index < 0) return '开篇 · 第 ${_activeParagraph + 1} 段';
+    final entry = _chapters[index];
+    final total = widget.book.paragraphs.length;
+    final next = index + 1 < _chapters.length
+        ? _chapters[index + 1].key
+        : total;
+    final span = (next - entry.key).clamp(1, total);
+    final read = (_activeParagraph - entry.key + 1).clamp(0, span);
+    final percent = (read / span * 100).round().clamp(0, 100);
+    return '${entry.value} · 本章 $percent%';
+  }
+
+  /// Rough time left in the book, from the reader's position and a fixed pace.
+  String get _remainingLabel {
+    final total = widget.book.paragraphs.length;
+    if (total == 0 || _totalChars == 0) return '';
+    final read = (_activeParagraph + 1).clamp(0, total);
+    final remaining = total - read;
+    if (remaining <= 0) return '已读完';
+    final minutes = (_totalChars * remaining / total / _charsPerMinute).ceil();
+    if (minutes < 1) return '剩余不足 1 分钟';
+    if (minutes < 60) return '剩余约 $minutes 分钟';
+    final hours = minutes ~/ 60;
+    final rest = minutes % 60;
+    return '剩余约 $hours 小时 $rest 分钟';
+  }
   String get _pageProgress {
     if (_readingMode == ReadingMode.page) {
       final total = _pager.estimatedTotalPageCount;
@@ -824,6 +1016,16 @@ bool _isScrollIdle() => true;
   void _handleReaderPointerMove(PointerMoveEvent event) {
     final down = _readerPointerDownPosition;
     if (down == null) return;
+    // Fanqie closes the reader chrome as soon as the finger moves past
+    // touch-slop — leaving the menu open while the user is clearly trying to
+    // turn/scroll is a major source of "this feels broken".
+    if (_showControls) {
+      final dx = event.position.dx - down.dx;
+      final dy = event.position.dy - down.dy;
+      if (dx * dx + dy * dy > 18 * 18) {
+        setState(() => _showControls = false);
+      }
+    }
     final atTop =
         _readingMode != ReadingMode.scroll ||
         (!_scrollController.hasClients || _scrollController.offset <= 2);
@@ -990,9 +1192,7 @@ bool _isScrollIdle() => true;
                               final paragraphIndex = index - 2;
                               final isHeading = ReaderMarkup.heading
                                       .hasMatch(widget.book.paragraphs[paragraphIndex]) ||
-                                  widget.book.tocEntries.any(
-                                    (e) => e.paragraphIndex == paragraphIndex,
-                                  );
+                                  _tocParagraphs.contains(paragraphIndex);
                               return KeyedSubtree(
                                 key: _paragraphKeys.putIfAbsent(
                                   paragraphIndex,
@@ -1022,7 +1222,14 @@ bool _isScrollIdle() => true;
                                           currentParagraph: () =>
                                               paragraphIndex,
                                           notesLibrary: _notesLibrary,
+                                          onHighlight: _toggleHighlight,
                                         ),
+                                    highlights:
+                                        _highlights[paragraphIndex] ??
+                                        const [],
+                                    isChapterHeading: _tocParagraphs.contains(
+                                      paragraphIndex,
+                                    ),
                                     onJumpToParagraph: _jumpToParagraph,
                                   ),
                                 ),
@@ -1067,16 +1274,44 @@ bool _isScrollIdle() => true;
             ),
             if (_pullDownDistance > 8) _bookmarkPullIndicator(context),
             if (_coverFromPage != null) _coverTurnOverlay(context),
+            if (_eyeCare != ReaderEyeCare.off)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ColoredBox(
+                    color: const Color(
+                      0xffd9a441,
+                    ).withValues(alpha: _eyeCare.opacity),
+                  ),
+                ),
+              ),
             if (!_showControls)
               ReaderStatusBar(
                 progressLabel: _pageProgress,
                 batteryLabel: _batteryText,
+                chapterLabel: _chapterLabel,
+                remainingLabel: _remainingLabel,
               ),
-            if (_showControls)
-              ReaderHeaderPanel(
-                title: widget.book.title,
-                onBack: () => Navigator.of(context).maybePop(),
+            // Controls slide + fade instead of popping in — Fanqie's chrome
+            // animates, and a hard cut is one of the main reasons an overlay
+            // feels "janky" even when the reader itself is fine.
+            AnimatedSlide(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              offset: _showControls ? Offset.zero : const Offset(0, -1),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                opacity: _showControls ? 1 : 0,
+                child: _showControls
+                    ? ReaderHeaderPanel(
+                        title: widget.book.title,
+                        onBack: () => Navigator.of(context).maybePop(),
+                        bookmarked: _isCurrentViewBookmarked,
+                        onToggleBookmark: _toggleBookmarkAtCurrentPosition,
+                      )
+                    : const SizedBox.shrink(),
               ),
+            ),
             if (_isCurrentViewBookmarked)
               IgnorePointer(
                 child: SafeArea(
@@ -1130,74 +1365,115 @@ bool _isScrollIdle() => true;
                   ),
                 ),
               ),
-            if (_showControls)
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.sizeOf(context).height * .58,
-                  ),
-                  child: SafeArea(
-                    top: false,
-                    child: ReaderBottomControls(
-                      fontSize: _fontSize,
-                      readerFontWeight: _readerFontWeight,
-                      lineSpacing: _lineSpacing,
-                      background: _backgroundFor(context),
-                      readingMode: _readingMode,
-                      progress: _progress,
-                      canSeek: _canSeekProgress,
-                      currentParagraph: _activeParagraph,
-                      chapters: _chapterEntries(),
-                      chapterPageLabels: _chapterPageLabels(),
-                      bookmarks: [
-                        for (final bookmark in _bookmarks)
-                          MapEntry(
-                            bookmark,
-                            bookmarkSummary(widget.book.paragraphs, bookmark),
+            AnimatedSlide(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutCubic,
+              offset: _showControls ? Offset.zero : const Offset(0, 1),
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                opacity: _showControls ? 1 : 0,
+                child: !_showControls
+                    ? const SizedBox.shrink()
+                    : Align(
+                        alignment: Alignment.bottomCenter,
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            // Give the catalog drawer room to breathe — Fanqie's
+                            // TOC sheet is roughly half-screen, not a 280px strip.
+                            maxHeight: MediaQuery.sizeOf(context).height * .72,
                           ),
-                      ],
-                      onProgress: _jumpToProgress,
-                      onJumpToParagraph: (paragraph) {
-                        setState(() => _showControls = false);
-                        _jumpToParagraph(paragraph);
-                      },
-                      onRemoveBookmark: _removeBookmark,
-                      onToggleUiTheme: widget.onToggleUiTheme,
-                      onShowFonts: _showFontPicker,
-                    onFontSize: (value) {
-                      setState(() {
-                        _fontSize = value;
-                      });
-                      _scheduleSave();
-                    },
-                    onReaderFontWeight: (value) {
-                      setState(() => _readerFontWeight = value);
-                      _saveTimer?.cancel();
-                      _saveState();
-                    },
-                    onLineSpacing: (value) {
-                      setState(() => _lineSpacing = value);
-                      _saveTimer?.cancel();
-                      _saveState();
-                    },
-                    onBackground: (value) {
-                      setState(() => _background = value);
-                      _scheduleSave();
-                    },
-                    onReadingMode: (value) {
-                      _setReadingMode(value);
-                    },
-                    pageTurnStyle: _pageTurnStyle,
-                    onPageTurnStyle: (value) {
-                      setState(() => _pageTurnStyle = value);
-                      _saveTimer?.cancel();
-                      _saveState();
-                    },
-                  ),
-                  ),
-                ),
+                          child: SafeArea(
+                            top: false,
+                            child: ReaderBottomControls(
+                              fontSize: _fontSize,
+                              readerFontWeight: _readerFontWeight,
+                              lineSpacing: _lineSpacing,
+                              background: _backgroundFor(context),
+                              readingMode: _readingMode,
+                              progress: _progress,
+                              canSeek: _canSeekProgress,
+                              currentParagraph: _activeParagraph,
+                              chapters: _chapterEntries(),
+                              chapterPageLabels: _chapterPageLabels(),
+                              bookmarks: [
+                                for (final bookmark in _bookmarks)
+                                  MapEntry(
+                                    bookmark,
+                                    bookmarkSummary(widget.book.paragraphs, bookmark),
+                                  ),
+                              ],
+                              notes: _notes,
+                              onProgress: _jumpToProgress,
+                              onJumpToParagraph: (paragraph) {
+                                setState(() => _showControls = false);
+                                _jumpToParagraph(paragraph);
+                              },
+                              onRemoveBookmark: _removeBookmark,
+                              onRemoveNote: _removeNote,
+                              onToggleUiTheme: widget.onToggleUiTheme,
+                              onShowFonts: _showFontPicker,
+                            onFontSize: (value) {
+                              setState(() {
+                                _fontSize = value;
+                              });
+                              _scheduleSave();
+                            },
+                            onReaderFontWeight: (value) {
+                              setState(() => _readerFontWeight = value);
+                              _saveTimer?.cancel();
+                              _saveState();
+                            },
+                            onLineSpacing: (value) {
+                              setState(() => _lineSpacing = value);
+                              _saveTimer?.cancel();
+                              _saveState();
+                            },
+                            onBackground: (value) {
+                              setState(() => _background = value);
+                              _scheduleSave();
+                            },
+                            onReadingMode: (value) {
+                              _setReadingMode(value);
+                            },
+                            pageTurnStyle: _pageTurnStyle,
+                            onPageTurnStyle: (value) {
+                              setState(() => _pageTurnStyle = value);
+                              _saveTimer?.cancel();
+                              _saveState();
+                            },
+                            brightness: _brightness,
+                            eyeCare: _eyeCare,
+                            keepScreenOn: _keepScreenOn,
+                            volumeKeys: _volumeKeys,
+                            onBrightness: (value) {
+                              setState(() => _brightness = value);
+                              _platform.setBrightness(value);
+                              _scheduleSave();
+                            },
+                            onEyeCare: (value) {
+                              setState(() => _eyeCare = value);
+                              _saveTimer?.cancel();
+                              _saveState();
+                            },
+                            onKeepScreenOn: (value) {
+                              setState(() => _keepScreenOn = value);
+                              _platform.setKeepScreenOn(value);
+                              _saveTimer?.cancel();
+                              _saveState();
+                            },
+                            onVolumeKeys: (value) {
+                              setState(() => _volumeKeys = value);
+                              _syncVolumeKeys();
+                              _saveTimer?.cancel();
+                              _saveState();
+                            },
+                          ),
+                          ),
+                        ),
+                      ),
               ),
+            ),
           ],
         ),
       ),
@@ -1250,6 +1526,13 @@ bool _isScrollIdle() => true;
                             currentParagraph: () =>
                                 fragments[index].paragraphIndex,
                             notesLibrary: _notesLibrary,
+                            onHighlight: _toggleHighlight,
+                          ),
+                          highlights:
+                              _highlights[fragments[index].paragraphIndex] ??
+                              const [],
+                          isChapterHeading: _tocParagraphs.contains(
+                            fragments[index].paragraphIndex,
                           ),
                           showImage: fragments[index].showImage,
                           showLinkAction:
@@ -1355,7 +1638,9 @@ bool _isScrollIdle() => true;
     _pageController
         .animateToPage(
           target,
-          duration: const Duration(milliseconds: 220),
+          // 180ms easeOutCubic: snappy tap-to-turn. Fanqie's slide mode uses a
+          // short custom-Scroller fling; long durations feel laggy on tap.
+          duration: const Duration(milliseconds: 180),
           curve: Curves.easeOutCubic,
         )
         .whenComplete(() {
@@ -1437,7 +1722,10 @@ bool _isScrollIdle() => true;
                     child: _coverPageSurface(context, movingPage),
                   ),
                   builder: (context, child) {
-                    final progress = Curves.easeInOutCubic.transform(
+                    // easeOutCubic: fast start, gentle settle — matches the
+                    // "flick and it goes" feel of Fanqie's custom Scroller
+                    // (low friction, long fling) better than ease-in-out.
+                    final progress = Curves.easeOutCubic.transform(
                       _coverAnim.value,
                     );
                     final dx = isNext ? -progress : -1 + progress;

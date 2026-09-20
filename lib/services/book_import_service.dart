@@ -75,18 +75,27 @@ class BookImportService {
     return book;
   }
 
-  /// Replaces any same title+format entry and persists the library.
+  /// Replaces any existing entry with the same content id (Fanqie dedupes on
+  /// file MD5 via `kn4.h.J(md5)`), writes only the new body and refreshes the
+  /// shelf index.
   Future<List<ImportedBook>> persistImported(
     BookLibrary library,
     List<ImportedBook> existing,
     ImportedBook book,
   ) async {
+    final incomingId = book.storageId;
     final updatedBooks = <ImportedBook>[
       book,
       for (final item in existing)
-        if (item.title != book.title || item.format != book.format) item,
+        if (item.storageId != incomingId) item,
     ];
-    await library.save(updatedBooks);
+    if (updatedBooks.length > BookImporter.maxBookCount) {
+      throw const BookImportException(
+        '书架已满（上限 ${BookImporter.maxBookCount} 本），请先删除部分书籍。',
+      );
+    }
+    await library.saveBookContent(book);
+    await library.saveIndex(updatedBooks);
     return updatedBooks;
   }
 }

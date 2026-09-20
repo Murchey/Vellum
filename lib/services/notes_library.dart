@@ -3,6 +3,22 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+/// `note` keeps a written thought, `highlight` only marks the passage — both
+/// render as a highlight in the body, the difference is the comment.
+enum ReadingNoteStyle {
+  note('笔记'),
+  highlight('划线');
+
+  const ReadingNoteStyle(this.label);
+  final String label;
+
+  static ReadingNoteStyle fromStorage(String value) =>
+      ReadingNoteStyle.values.firstWhere(
+        (style) => style.name == value,
+        orElse: () => ReadingNoteStyle.note,
+      );
+}
+
 class ReadingNote {
   const ReadingNote({
     required this.id,
@@ -12,6 +28,7 @@ class ReadingNote {
     required this.selectedText,
     this.note = '',
     required this.createdAt,
+    this.style = 'note',
   });
 
   final String id;
@@ -21,6 +38,9 @@ class ReadingNote {
   final String selectedText;
   final String note;
   final DateTime createdAt;
+  final String style;
+
+  ReadingNoteStyle get kind => ReadingNoteStyle.fromStorage(style);
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -30,6 +50,7 @@ class ReadingNote {
     'selectedText': selectedText,
     'note': note,
     'createdAt': createdAt.toIso8601String(),
+    'style': style,
   };
 
   factory ReadingNote.fromJson(Map<String, dynamic> json) {
@@ -43,6 +64,7 @@ class ReadingNote {
       selectedText: json['selectedText'] as String? ?? '',
       note: json['note'] as String? ?? '',
       createdAt: created,
+      style: json['style'] as String? ?? 'note',
     );
   }
 }
@@ -83,6 +105,7 @@ class NotesLibrary {
     required int paragraphIndex,
     required String selectedText,
     String note = '',
+    ReadingNoteStyle style = ReadingNoteStyle.note,
   }) async {
     final now = DateTime.now();
     final item = ReadingNote(
@@ -93,11 +116,21 @@ class NotesLibrary {
       selectedText: selectedText,
       note: note,
       createdAt: now,
+      style: style.name,
     );
     final notes = await load();
     notes.insert(0, item);
     await saveAll(notes);
     return item;
+  }
+
+  /// Notes and highlights belonging to one book, newest first.
+  Future<List<ReadingNote>> loadForBook(String bookId) async {
+    final notes = await load();
+    return [
+      for (final note in notes)
+        if (note.bookId == bookId) note,
+    ];
   }
 
   Future<void> delete(String id) async {

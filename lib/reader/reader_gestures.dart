@@ -11,11 +11,22 @@ enum ReaderTapAction {
 }
 
 /// Pure gesture classification for the reader surface.
+///
+/// Tap zones follow Fanqie (`zw4/n.java`): left third / middle third / right
+/// third for paged mode; in scroll mode the control zone is a wider band
+/// (0.3H–0.65H) so the thumb does not have to reach the exact centre.
 abstract final class ReaderGestures {
+  static const double leftZoneEnd = 0.333;
+  static const double rightZoneStart = 0.667;
+  static const double scrollCenterTop = 0.30;
+  static const double scrollCenterBottom = 0.65;
+
   static bool isCenterTap(Offset position, double width, double height) {
-    final dx = (position.dx - width / 2).abs();
-    final dy = (position.dy - height / 2).abs();
-    return dx < width * 0.3 && dy < height * 0.25;
+    final inX = position.dx >= width * leftZoneEnd &&
+        position.dx <= width * rightZoneStart;
+    final inY = position.dy >= height * scrollCenterTop &&
+        position.dy <= height * scrollCenterBottom;
+    return inX && inY;
   }
 
   static const double bookmarkPullThreshold = 96;
@@ -23,6 +34,10 @@ abstract final class ReaderGestures {
   /// Long-press to select text then drag down must not arm bookmark.
   /// Bookmark requires a quick, mostly vertical downward flick at the top.
   static const Duration bookmarkMaxHold = Duration(milliseconds: 400);
+
+  /// Fanqie throttles volume-key paging to 300 ms so a held key does not
+  /// flip dozens of pages.
+  static const Duration volumeKeyThrottle = Duration(milliseconds: 300);
 
   static ReaderTapAction resolvePointerUp({
     required DateTime? downAt,
@@ -59,8 +74,12 @@ abstract final class ReaderGestures {
       return ReaderTapAction.none;
     }
 
-    if (upPosition.dx < screenWidth * .3) return ReaderTapAction.previousPage;
-    if (upPosition.dx > screenWidth * .7) return ReaderTapAction.nextPage;
+    if (upPosition.dx < screenWidth * leftZoneEnd) {
+      return ReaderTapAction.previousPage;
+    }
+    if (upPosition.dx > screenWidth * rightZoneStart) {
+      return ReaderTapAction.nextPage;
+    }
     return ReaderTapAction.toggleControls;
   }
 }

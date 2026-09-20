@@ -8,6 +8,9 @@ import 'book_widgets.dart';
 class LibraryPage extends StatefulWidget {
   final List<ImportedBook> books;
   final List<LibraryFolder> folders;
+
+  /// Reading progress 0–1 keyed by `book.storageId`, for shelf cards.
+  final Map<String, double> progressById;
   final ValueChanged<ImportedBook> onOpen;
   final VoidCallback onImport;
   final ValueChanged<ImportedBook> onDelete;
@@ -24,6 +27,7 @@ class LibraryPage extends StatefulWidget {
     required this.onImport,
     required this.onDelete,
     this.folders = const [],
+    this.progressById = const {},
     this.onEditCover,
     this.onMoveToFolder,
     this.onCreateFolder,
@@ -303,6 +307,7 @@ class _LibraryPageState extends State<LibraryPage> {
                         final book = filtered[index];
                         return BookGridCard(
                           book: book,
+                          progress: widget.progressById[book.storageId] ?? 0,
                           onTap: () => widget.onOpen(book),
                           onDelete: () => widget.onDelete(book),
                           onLongPress: () => _showBookActions(book),

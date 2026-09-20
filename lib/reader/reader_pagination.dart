@@ -225,7 +225,7 @@ class ProgressiveBookPager {
     final measureStyle = isHeading
         ? TextStyle(
             fontFamily: _config.fontFamily,
-            fontSize: _config.fontSize * ReaderMarkup.headingFontScale(headingLevel!),
+            fontSize: _config.fontSize * ReaderMarkup.headingFontScale(headingLevel),
             height: ReaderMarkup.headingLineHeight(headingLevel),
             fontWeight: FontWeight.w700,
           )

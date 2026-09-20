@@ -26,6 +26,9 @@ class ReaderParagraph extends StatelessWidget {
     this.indentFirstLine = true,
     this.selectable = true,
     this.onJumpToParagraph,
+    this.highlights = const [],
+    this.highlightColor,
+    this.isChapterHeading,
     super.key,
   });
 
@@ -46,6 +49,16 @@ class ReaderParagraph extends StatelessWidget {
   final bool selectable;
   final ValueChanged<int>? onJumpToParagraph;
 
+  /// Selected passages of this paragraph, drawn with a highlight background.
+  final List<String> highlights;
+
+  /// Background painted behind [highlights]; defaults to the theme accent.
+  final Color? highlightColor;
+
+  /// Whether a table-of-contents entry starts here. Callers that know it should
+  /// pass it: the fallback scans every entry, which is O(entries) per build.
+  final bool? isChapterHeading;
+
   @override
   Widget build(BuildContext context) {
     final image = showImage ? book.imageBytes[paragraphIndex] : null;
@@ -56,9 +69,6 @@ class ReaderParagraph extends StatelessWidget {
         paragraphIndex >= 0 && paragraphIndex < book.paragraphs.length
         ? book.paragraphs[paragraphIndex]
         : paragraph;
-    final heading =
-        ReaderMarkup.heading.firstMatch(paragraph) ??
-        ReaderMarkup.heading.firstMatch(fullParagraph);
     final isQuote =
         ReaderMarkup.quote.hasMatch(paragraph) ||
         ReaderMarkup.quote.hasMatch(fullParagraph);
@@ -68,9 +78,9 @@ class ReaderParagraph extends StatelessWidget {
     final isCenter =
         ReaderMarkup.center.hasMatch(paragraph) ||
         ReaderMarkup.center.hasMatch(fullParagraph);
-    final isTocHeading = book.tocEntries.any(
-      (entry) => entry.paragraphIndex == paragraphIndex,
-    );
+    final isTocHeading =
+        isChapterHeading ??
+        book.tocEntries.any((entry) => entry.paragraphIndex == paragraphIndex);
     final effectiveHeading = ReaderMarkup.effectiveHeadingLevel(
       paragraph: paragraph,
       fullParagraph: fullParagraph,
@@ -116,7 +126,14 @@ class ReaderParagraph extends StatelessWidget {
                 : ReaderMarkup.headingLineHeight(effectiveHeading),
           ),
         ),
-      ..._richInlineSpans(plain, image: image),
+      ..._richInlineSpans(
+        plain,
+        image: image,
+        highlights: highlights,
+        highlightColor:
+            highlightColor ??
+            VellumTheme.accentOf(context).withValues(alpha: .22),
+      ),
     ];
     final alignment = effectiveHeading != null
         ? (plain.trim().length <= 28 ? TextAlign.center : TextAlign.start)
@@ -190,7 +207,12 @@ class ReaderParagraph extends StatelessWidget {
     );
   }
 
-  List<InlineSpan> _richInlineSpans(String source, {Uint8List? image}) {
+  List<InlineSpan> _richInlineSpans(
+    String source, {
+    Uint8List? image,
+    List<String> highlights = const [],
+    Color highlightColor = const Color(0x33a33d2e),
+  }) {
     final spans = <InlineSpan>[];
     final buffer = StringBuffer();
     var bold = false;
@@ -289,10 +311,75 @@ class ReaderParagraph extends StatelessWidget {
           );
         }
       }
-      return rebuilt;
+      spans
+        ..clear()
+        ..addAll(rebuilt);
     }
 
     if (spans.isEmpty) spans.add(TextSpan(text: source));
-    return spans;
+    if (highlights.isEmpty) return spans;
+    return _highlightSpans(spans, highlights, highlightColor);
+  }
+
+  /// Splits plain text spans so every occurrence of a highlighted passage gets
+  /// [highlightColor] as its background. Non-text spans pass through.
+  static List<InlineSpan> _highlightSpans(
+    List<InlineSpan> spans,
+    List<String> highlights,
+    Color highlightColor,
+  ) {
+    // The stored passage may carry the paragraph's leading indent or padding.
+    final needles = <String>[];
+    for (final highlight in highlights) {
+      final value = highlight.trim();
+      if (value.isNotEmpty && !needles.contains(value)) needles.add(value);
+    }
+    if (needles.isEmpty) return spans;
+
+    final result = <InlineSpan>[];
+    for (final span in spans) {
+      final text = span is TextSpan ? span.text : null;
+      if (text == null || text.isEmpty) {
+        result.add(span);
+        continue;
+      }
+      final ranges = <({int start, int end})>[];
+      for (final needle in needles) {
+        var from = 0;
+        while (true) {
+          final at = text.indexOf(needle, from);
+          if (at < 0) break;
+          ranges.add((start: at, end: at + needle.length));
+          from = at + needle.length;
+        }
+      }
+      if (ranges.isEmpty) {
+        result.add(span);
+        continue;
+      }
+      ranges.sort((a, b) => a.start.compareTo(b.start));
+      final base = (span as TextSpan).style ?? const TextStyle();
+      final marked = base.copyWith(backgroundColor: highlightColor);
+      var cursor = 0;
+      for (final range in ranges) {
+        final start = range.start.clamp(cursor, text.length);
+        final end = range.end.clamp(start, text.length);
+        if (start > cursor) {
+          result.add(
+            TextSpan(text: safeSubstring(text, cursor, start), style: base),
+          );
+        }
+        if (end > start) {
+          result.add(
+            TextSpan(text: safeSubstring(text, start, end), style: marked),
+          );
+        }
+        cursor = end;
+      }
+      if (cursor < text.length) {
+        result.add(TextSpan(text: safeSubstring(text, cursor), style: base));
+      }
+    }
+    return result;
   }
 }

@@ -211,7 +211,11 @@ class _ContinueCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${book.format.name.toUpperCase()} · ${book.paragraphCount} 段',
+                    [
+                      if (book.author.trim().isNotEmpty) book.author.trim(),
+                      book.format.name.toUpperCase(),
+                      '${book.paragraphCount} 段',
+                    ].join(' · '),
                     style: TextStyle(fontSize: 12, color: muted),
                   ),
                   const SizedBox(height: 18),

@@ -135,7 +135,8 @@ void main() {
     expect(find.byType(CupertinoNavigationBar), findsNothing);
 
     await tester.tapAt(const Offset(400, 300));
-    await tester.pump();
+    // Controls slide in over ~200ms; wait for the animation before hit-testing.
+    await tester.pumpAndSettle();
 
     expect(find.byType(CupertinoNavigationBar), findsNothing);
     expect(find.text('测试书'), findsWidgets);
@@ -149,11 +150,40 @@ void main() {
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
 
+    // 一级只留高频三项，其余收进二级菜单。
     expect(find.text('阅读设置'), findsOneWidget);
+    expect(find.text('亮度'), findsOneWidget);
+    expect(find.text('背景'), findsOneWidget);
+    expect(find.text('更多设置'), findsOneWidget);
+    expect(find.text('阅读方式'), findsNothing);
+    expect(find.text('字重'), findsNothing);
+    expect(find.text('常亮'), findsNothing);
+
+    await tester.tap(find.text('更多设置'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('更多设置'), findsWidgets);
     expect(find.text('阅读方式'), findsOneWidget);
     expect(find.text('上下滚动'), findsOneWidget);
     expect(find.text('左右翻页'), findsOneWidget);
+    expect(find.text('行间距'), findsOneWidget);
     expect(find.text('字重'), findsOneWidget);
+    expect(find.text('护眼'), findsOneWidget);
+    expect(find.text('常亮'), findsOneWidget);
+    expect(find.text('音量键'), findsOneWidget);
+    expect(find.text('字号'), findsNothing);
+
+    // 顶栏也有一个 chevron_back，返回二级菜单必须限定在设置面板内部。
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ReaderSettingsPanel),
+        matching: find.byIcon(CupertinoIcons.chevron_back),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('阅读设置'), findsOneWidget);
+    expect(find.text('阅读方式'), findsNothing);
     expect(find.byType(SelectableText), findsOneWidget);
   });
 
@@ -347,6 +377,9 @@ void main() {
     await tester.tapAt(const Offset(400, 300));
     await tester.pumpAndSettle();
     await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    // Reading mode now lives behind the 「更多设置」 second level.
+    await tester.tap(find.text('更多设置'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('左右翻页'));
     await tester.pump();

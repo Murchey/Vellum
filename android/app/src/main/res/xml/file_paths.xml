@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Roots the update APK may be shared from. The downloader writes into
+     getFilesDir()/updates, which is the files-path root below; cache and
+     external entries keep the installer working if that ever changes. -->
+<paths>
+    <files-path name="updates" path="." />
+    <cache-path name="cache" path="." />
+    <external-files-path name="external_files" path="." />
+</paths>

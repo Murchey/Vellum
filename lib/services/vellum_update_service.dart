@@ -88,7 +88,11 @@ class VellumReleaseInfo {
   /// APK assets grouped by ABI label (`arm64-v8a`, `armeabi-v7a`, `x86_64`…).
   ///
   /// Each entry keeps the original asset name and download URL.
-  List<UpdateApkAsset> get apkAssets {
+  List<UpdateApkAsset> get apkAssets => apkAssetsFor(null);
+
+  /// APK assets with [preferredAbi] moved to the front, then the usual
+  /// `arm64-v8a → armeabi-v7a → x86_64 → 通用` fallback order.
+  List<UpdateApkAsset> apkAssetsFor(String? preferredAbi) {
     final list = <UpdateApkAsset>[];
     for (final entry in assets.entries) {
       final abi = detectAbiFromAssetName(entry.key);
@@ -101,7 +105,17 @@ class VellumReleaseInfo {
       if (rank != 0) return rank;
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
-    return list;
+    if (preferredAbi == null) return list;
+    final preferred = <UpdateApkAsset>[
+      for (final asset in list)
+        if (asset.abi == preferredAbi) asset,
+    ];
+    if (preferred.isEmpty) return list;
+    return [
+      ...preferred,
+      for (final asset in list)
+        if (asset.abi != preferredAbi) asset,
+    ];
   }
 
   static int _abiRank(String? abi) {
@@ -169,6 +183,47 @@ String? detectAbiFromAssetName(String name) {
   }
   if (RegExp(r'(^|[^0-9])x86([^0-9_]|$)').hasMatch(lower)) return 'x86';
   return null;
+}
+
+/// Maps a device ABI entry (from `android.os.Build.SUPPORTED_ABIS`) onto the
+/// labels used in release asset names.
+String? normalizeAbiName(String name) {
+  switch (name.trim().toLowerCase()) {
+    case 'arm64-v8a':
+    case 'arm64':
+    case 'aarch64':
+      return 'arm64-v8a';
+    case 'armeabi-v7a':
+    case 'armeabi':
+    case 'armv7l':
+      return 'armeabi-v7a';
+    case 'x86_64':
+    case 'x86-64':
+    case 'amd64':
+      return 'x86_64';
+    case 'x86':
+    case 'i386':
+    case 'i686':
+      return 'x86';
+    default:
+      return null;
+  }
+}
+
+/// Short explanation shown next to each variant in the update sheet.
+String abiDescription(String? abi) {
+  switch (abi) {
+    case 'arm64-v8a':
+      return '64 位 · 绝大多数手机';
+    case 'armeabi-v7a':
+      return '32 位 · 较老机型';
+    case 'x86_64':
+      return 'x86 平板 / 模拟器';
+    case 'x86':
+      return '32 位模拟器';
+    default:
+      return '通用包 · 体积更大';
+  }
 }
 
 class VellumUpdateService {

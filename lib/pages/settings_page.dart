@@ -6,8 +6,6 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 
-import 'package:url_launcher/url_launcher.dart';
-
 
 
 import '../services/book_library.dart';
@@ -23,6 +21,7 @@ import 'font_manager_sheet.dart';
 
 import 'ebook_to_txt_page.dart';
 import 'reading_stats_page.dart';
+import 'update_sheet.dart';
 
 
 
@@ -107,6 +106,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late Future<StorageUsage> _usage;
   bool _checkingUpdate = false;
+  bool _autoCheckUpdate = true;
   String _updateRepo = '';
   final _library = const BookLibrary();
   final _statsService = const ReadingStatsService();
@@ -117,7 +117,18 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _usage = widget.storageUsage();
     _loadUpdateRepo();
+    _loadUpdatePreferences();
     _loadReadingStats();
+  }
+
+  Future<void> _loadUpdatePreferences() async {
+    final enabled = await _library.loadAutoUpdateCheck();
+    if (mounted) setState(() => _autoCheckUpdate = enabled);
+  }
+
+  Future<void> _setAutoCheckUpdate(bool enabled) async {
+    setState(() => _autoCheckUpdate = enabled);
+    await _library.saveAutoUpdateCheck(enabled);
   }
 
   Future<void> _loadReadingStats() async {
@@ -236,163 +247,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
 
   Future<void> _checkForUpdate() async {
-
     setState(() => _checkingUpdate = true);
-
     try {
-
-      final release = await const VellumUpdateService().check(
-        repository: _updateRepo,
-      );
-
-      if (!mounted) return;
-
-      if (release == null) {
-
-        await _showUpdateDialog('无法连接 GitHub Release，请稍后重试。');
-
-      } else if (!release.hasUpdate) {
-
-        await _showUpdateDialog('当前已是最新版本 V${release.currentVersion}。');
-
-      } else {
-        await _showApkPicker(release);
-      }
-
-    } catch (error) {
-      if (mounted) {
-        await _showUpdateDialog('检查更新失败：$error');
-      }
+      await checkForUpdates(context, repository: _updateRepo, quiet: false);
     } finally {
       if (mounted) setState(() => _checkingUpdate = false);
-
     }
-
-  }
-
-  Future<void> _showApkPicker(VellumReleaseInfo release) async {
-    final apks = release.apkAssets;
-    final notes = release.notes.trim();
-    final summary = notes.isEmpty
-        ? '发现新版本 V${release.latestVersion}，请选择要下载的安装包。'
-        : '$notes\n\n请选择要下载的安装包。';
-
-    if (apks.isEmpty) {
-      await showCupertinoDialog<void>(
-        context: context,
-        builder: (context) => CupertinoAlertDialog(
-          title: Text('发现新版本 V${release.latestVersion}'),
-          content: Text(
-            '$summary\n\n该 Release 未附带 APK，请前往发布页下载。',
-          ),
-          actions: [
-            CupertinoDialogAction(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('稍后'),
-            ),
-            CupertinoDialogAction(
-              isDefaultAction: true,
-              onPressed: () async {
-                Navigator.pop(context);
-                await launchUrl(
-                  Uri.parse(release.releaseUrl),
-                  mode: LaunchMode.externalApplication,
-                );
-              },
-              child: const Text('前往发布页'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    UpdateApkAsset selected = apks.first;
-    for (final apk in apks) {
-      if (apk.abi == 'arm64-v8a') {
-        selected = apk;
-        break;
-      }
-    }
-    if (selected.abi == null) {
-      for (final apk in apks) {
-        if (apk.abi != null) {
-          selected = apk;
-          break;
-        }
-      }
-    }
-    final url = await showCupertinoDialog<String>(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => CupertinoAlertDialog(
-          title: Text('发现新版本 V${release.latestVersion}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(summary, textAlign: TextAlign.left),
-              const SizedBox(height: 12),
-              for (final apk in apks)
-                CupertinoButton(
-                  padding: EdgeInsets.zero,
-                  onPressed: () {
-                    setDialogState(() => selected = apk);
-                  },
-                  child: Row(
-                    children: [
-                      Icon(
-                        selected.name == apk.name
-                            ? CupertinoIcons.checkmark_circle_fill
-                            : CupertinoIcons.circle,
-                        size: 22,
-                        color: selected.name == apk.name
-                            ? VellumTheme.accentOf(context)
-                            : VellumTheme.mutedOf(context),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          apk.label,
-                          textAlign: TextAlign.left,
-                          style: TextStyle(
-                            color: VellumTheme.inkOf(context),
-                            fontWeight: selected.name == apk.name
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-          actions: [
-            CupertinoDialogAction(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('稍后'),
-            ),
-            CupertinoDialogAction(
-              onPressed: () async {
-                Navigator.pop(context);
-                await launchUrl(
-                  Uri.parse(release.releaseUrl),
-                  mode: LaunchMode.externalApplication,
-                );
-              },
-              child: const Text('发布页'),
-            ),
-            CupertinoDialogAction(
-              isDefaultAction: true,
-              onPressed: () => Navigator.pop(context, selected.url),
-              child: const Text('下载'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (url == null || !mounted) return;
-    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
 
@@ -736,6 +596,18 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: const Text('更新仓库'),
                   additionalInfo: const Text('自定义'),
                   onTap: _editUpdateRepo,
+                ),
+                CupertinoListTile(
+                  backgroundColor: pageBackground,
+                  backgroundColorActivated: pressedBackground,
+                  leading: const Icon(CupertinoIcons.arrow_2_circlepath),
+                  title: const Text('启动时自动检查更新'),
+                  additionalInfo: Text(_autoCheckUpdate ? '开' : '关'),
+                  trailing: CupertinoSwitch(
+                    value: _autoCheckUpdate,
+                    onChanged: _setAutoCheckUpdate,
+                  ),
+                  onTap: () => _setAutoCheckUpdate(!_autoCheckUpdate),
                 ),
 
               ],

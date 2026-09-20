@@ -37,6 +37,13 @@
             </list>
           </value>
         </entry>
+        <entry key="charset">
+          <value>
+            <list>
+              <option value="$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/charset-2.0.1/lib" />
+            </list>
+          </value>
+        </entry>
         <entry key="clock">
           <value>
             <list>
@@ -553,6 +560,7 @@
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/async-2.13.1/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/boolean_selector-2.1.2/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/characters-1.4.1/lib" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/charset-2.0.1/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/clock-1.1.2/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/code_assets-1.2.1/lib" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/collection-1.19.1/lib" />

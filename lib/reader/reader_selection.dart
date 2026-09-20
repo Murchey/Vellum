@@ -26,12 +26,14 @@ Future<void> openSelectionService(
   await launchUrl(uri, mode: LaunchMode.externalApplication);
 }
 
-/// Selection toolbar factory that can also open DeepL and attach notes.
+/// Selection toolbar factory that can also open DeepL, attach notes and mark
+/// the passage with a highlight.
 EditableTextContextMenuBuilder createReaderSelectionToolbar({
   required String bookId,
   required String bookTitle,
   required int Function() currentParagraph,
   NotesLibrary notesLibrary = const NotesLibrary(),
+  Future<void> Function(String selected, int paragraphIndex)? onHighlight,
 }) {
   return (BuildContext context, EditableTextState editableTextState) {
     final value = editableTextState.textEditingValue;
@@ -42,6 +44,14 @@ EditableTextContextMenuBuilder createReaderSelectionToolbar({
         onPressed: () =>
             editableTextState.copySelection(SelectionChangedCause.toolbar),
       ),
+      if (selected.isNotEmpty && onHighlight != null)
+        ContextMenuButtonItem(
+          label: '划线',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            onHighlight(selected, currentParagraph());
+          },
+        ),
       if (selected.isNotEmpty)
         ContextMenuButtonItem(
           label: 'Bing 查询',

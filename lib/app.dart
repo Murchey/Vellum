@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 
 
@@ -20,6 +21,8 @@ import 'pages/cover_editor_sheet.dart';
 import 'pages/library_pages.dart';
 
 import 'pages/settings_page.dart';
+
+import 'pages/update_sheet.dart';
 
 import 'pages/writing_page.dart';
 
@@ -436,6 +439,7 @@ class _LibraryShellState extends State<LibraryShell> {
   final _library = const BookLibrary();
 
   ReadingState? _continueState;
+  final Map<String, double> _progressById = {};
 
   int _tab = 0;
 
@@ -453,6 +457,26 @@ class _LibraryShellState extends State<LibraryShell> {
 
     _loadLibrary();
 
+    _scheduleUpdateCheck();
+
+  }
+
+  /// Checks the release feed once per launch, a moment after the shelf settles.
+  /// Silent when up to date or offline; the setting can turn it off.
+  Future<void> _scheduleUpdateCheck() async {
+    // Flutter tests set FLUTTER_TEST; a delayed network check would leave a
+    // pending timer and is pointless there.
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+    try {
+      final enabled = await _library.loadAutoUpdateCheck();
+      if (!enabled) return;
+      final repository = await _library.loadUpdateRepository();
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      if (!mounted) return;
+      await checkForUpdates(context, repository: repository);
+    } catch (_) {
+      // Checking for updates must never get in the way of opening the app.
+    }
   }
 
 
@@ -463,13 +487,18 @@ class _LibraryShellState extends State<LibraryShell> {
     final folders = await _library.loadFolders();
 
     ReadingState? continueState;
+    final progressById = <String, double>{};
 
     if (books.isNotEmpty) {
       for (final book in books) {
         final state = await _library.loadReadingState(book);
+        final total = book.paragraphCount;
+        if (total > 1) {
+          progressById[book.storageId] =
+              (state.paragraphIndex / (total - 1)).clamp(0.0, 1.0);
+        }
         if (state.paragraphIndex > 0 || state.page > 0 || state.position > 0) {
           continueState = state;
-          break;
         }
       }
       continueState ??= await _library.loadReadingState(books.first);
@@ -490,6 +519,9 @@ class _LibraryShellState extends State<LibraryShell> {
         ..addAll(folders);
 
       _continueState = continueState;
+      _progressById
+        ..clear()
+        ..addAll(progressById);
 
     });
 
@@ -769,7 +801,7 @@ class _LibraryShellState extends State<LibraryShell> {
 
     setState(() => _books.remove(book));
 
-    await _library.save(_books);
+    await _library.saveIndex(_books);
 
     await _library.deleteBook(book);
 
@@ -868,6 +900,8 @@ class _LibraryShellState extends State<LibraryShell> {
                 books: _books,
 
                 folders: _folders,
+
+                progressById: _progressById,
 
                 onOpen: _openBook,
 

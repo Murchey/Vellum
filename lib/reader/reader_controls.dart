@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 
+import '../services/notes_library.dart';
 import '../theme/vellum_theme.dart';
 import 'reader_control_panels.dart';
 import 'reader_models.dart';
@@ -25,9 +26,11 @@ class ReaderBottomControls extends StatefulWidget {
     required this.chapters,
     required this.chapterPageLabels,
     required this.bookmarks,
+    required this.notes,
     required this.onProgress,
     required this.onJumpToParagraph,
     required this.onRemoveBookmark,
+    required this.onRemoveNote,
     this.onToggleUiTheme,
     required this.onShowFonts,
     required this.onFontSize,
@@ -37,6 +40,14 @@ class ReaderBottomControls extends StatefulWidget {
     required this.onReadingMode,
     this.pageTurnStyle = PageTurnStyle.cover,
     required this.onPageTurnStyle,
+    required this.brightness,
+    required this.eyeCare,
+    required this.keepScreenOn,
+    required this.volumeKeys,
+    required this.onBrightness,
+    required this.onEyeCare,
+    required this.onKeepScreenOn,
+    required this.onVolumeKeys,
     super.key,
   });
 
@@ -51,9 +62,11 @@ class ReaderBottomControls extends StatefulWidget {
   final List<MapEntry<int, String>> chapters;
   final Map<int, String> chapterPageLabels;
   final List<MapEntry<int, String>> bookmarks;
+  final List<ReadingNote> notes;
   final ValueChanged<double> onProgress;
   final ValueChanged<int> onJumpToParagraph;
   final Future<void> Function(int) onRemoveBookmark;
+  final Future<void> Function(String) onRemoveNote;
   final VoidCallback? onToggleUiTheme;
   final VoidCallback onShowFonts;
   final ValueChanged<double> onFontSize;
@@ -63,6 +76,14 @@ class ReaderBottomControls extends StatefulWidget {
   final ValueChanged<ReadingMode> onReadingMode;
   final PageTurnStyle pageTurnStyle;
   final ValueChanged<PageTurnStyle> onPageTurnStyle;
+  final double brightness;
+  final ReaderEyeCare eyeCare;
+  final bool keepScreenOn;
+  final bool volumeKeys;
+  final ValueChanged<double> onBrightness;
+  final ValueChanged<ReaderEyeCare> onEyeCare;
+  final ValueChanged<bool> onKeepScreenOn;
+  final ValueChanged<bool> onVolumeKeys;
 
   @override
   State<ReaderBottomControls> createState() => _ReaderBottomControlsState();
@@ -168,11 +189,13 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                               ReaderDirectoryPanel(
                                 chapters: widget.chapters,
                                 bookmarks: widget.bookmarks,
+                                notes: widget.notes,
                                 chapterPageLabels: widget.chapterPageLabels,
                                 currentParagraph: widget.currentParagraph,
                                 readingMode: widget.readingMode,
                                 onJumpToParagraph: widget.onJumpToParagraph,
                                 onRemoveBookmark: widget.onRemoveBookmark,
+                                onRemoveNote: widget.onRemoveNote,
                                 onClose: () =>
                                     setState(() => _openPanel = null),
                               ),
@@ -183,12 +206,20 @@ class _ReaderBottomControlsState extends State<ReaderBottomControls> {
                               background: widget.background,
                               readingMode: widget.readingMode,
                               pageTurnStyle: widget.pageTurnStyle,
+                              brightness: widget.brightness,
+                              eyeCare: widget.eyeCare,
+                              keepScreenOn: widget.keepScreenOn,
+                              volumeKeys: widget.volumeKeys,
                               onFontSize: widget.onFontSize,
                               onReaderFontWeight: widget.onReaderFontWeight,
                               onLineSpacing: widget.onLineSpacing,
                               onBackground: widget.onBackground,
                               onReadingMode: widget.onReadingMode,
                               onPageTurnStyle: widget.onPageTurnStyle,
+                              onBrightness: widget.onBrightness,
+                              onEyeCare: widget.onEyeCare,
+                              onKeepScreenOn: widget.onKeepScreenOn,
+                              onVolumeKeys: widget.onVolumeKeys,
                               onShowFonts: widget.onShowFonts,
                               onClose: () =>
                                   setState(() => _openPanel = null),
