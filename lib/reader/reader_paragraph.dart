@@ -106,12 +106,19 @@ class ReaderParagraph extends StatelessWidget {
       color: bodyInk,
       decoration: target == null ? null : TextDecoration.underline,
     );
-    final needsFirstLineIndent =
-        indentFirstLine &&
-        effectiveHeading == null &&
-        !isQuote &&
-        !isList &&
-        !isCenter;
+    // Chinese body always gets `　　` unless it is a real title / quote /
+    // list, or the source already carries indent. Synthetic TOC hits and
+    // whole-book center layouts must not strip indent from prose.
+    final needsFirstLineIndent = indentFirstLine
+        ? ReaderMarkup.shouldIndentFirstLine(
+            paragraph: paragraph,
+            fullParagraph: fullParagraph,
+            headingLevel: effectiveHeading,
+            isQuote: isQuote,
+            isList: isList,
+            isCenter: isCenter,
+          )
+        : false;
     final plain = ReaderMarkup.readerText(paragraph);
     final spans = <InlineSpan>[
       // Text indent, not WidgetSpan: a leading WidgetSpan breaks SelectionArea

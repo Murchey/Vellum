@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:charset/charset.dart' show gbk;
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'book_models.dart';
 import 'html_text_pipeline.dart';
 
@@ -213,12 +216,15 @@ class MobiDecoder {
         throw const BookImportException('MOBI 中没有正文记录。');
       }
 
-      // Metadata: PalmDB name + EXTH (Fanqie reads book name via MobiParser.f()).
+      // Metadata: PalmDB name + EXTH + MOBI Full Name
+      // (Fanqie: MobiParser.f() → nativeGetFullName / GetFullName).
       final meta = _readExth(bytes, data, header);
+      final fullName = _mobiFullName(bytes, data, header);
       final title = _resolveTitle(
         filename: filename,
         palmName: _palmDbName(bytes),
         exthTitle: meta.updatedTitle,
+        fullName: fullName,
       );
       final author = meta.author;
 
@@ -328,21 +334,167 @@ class MobiDecoder {
   }
 
   /// PalmDB database name — the 32-byte title stored at the file head.
+  ///
+  /// Historically ASCII-only, so Chinese books often carry pinyin here
+  /// (`hali bote`) instead of the real title.
   String _palmDbName(Uint8List bytes) {
     if (bytes.length < 32) return '';
     final raw = ascii.decode(bytes.sublist(0, 32), allowInvalid: true);
     return raw.replaceAll('\x00', '').trim();
   }
 
+  /// MOBI header "full name" — the real display title, pointed to by
+  /// offset/length at record0+84/88 (MOBI header + 0x44/0x48).
+  ///
+  /// Fanqie exposes this via `nativeGetFullName`; it is usually the correct
+  /// Chinese title when PalmDB is pinyin.
+  String _mobiFullName(Uint8List bytes, ByteData data, int header) {
+    try {
+      if (header + 92 > bytes.length) return '';
+      final offset = data.getUint32(header + 84, Endian.big);
+      final length = data.getUint32(header + 88, Endian.big);
+      if (length <= 0 || length > 2048) return '';
+      if (offset <= 0 || offset + length > bytes.length) return '';
+      final raw = bytes.sublist(offset, offset + length);
+      return _decodeMobiMetaString(
+        raw,
+        declaredEncoding: data.getUint32(header + 28, Endian.big),
+      );
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Decodes MOBI metadata bytes trying declared encoding → UTF-8 → GBK →
+  /// latin1. Chinese MOBI files frequently store metadata in GBK even when
+  /// the text-encoding field says cp1252.
+  String _decodeMobiMetaString(
+    List<int> raw, {
+    int? declaredEncoding,
+  }) {
+    if (raw.isEmpty) return '';
+    String tryUtf8() => utf8.decode(raw, allowMalformed: false);
+    String tryGbk() => gbk.decode(raw, allowMalformed: false);
+
+    if (declaredEncoding == 65001) {
+      try {
+        final value = tryUtf8().trim();
+        if (value.isNotEmpty && !_looksMojibake(value)) return value;
+      } catch (_) {}
+    }
+    try {
+      final value = tryUtf8().trim();
+      if (value.isNotEmpty && !_looksMojibake(value)) return value;
+    } catch (_) {}
+    try {
+      final value = tryGbk().trim();
+      if (value.isNotEmpty && !_looksMojibake(value)) return value;
+    } catch (_) {}
+    return latin1.decode(raw, allowInvalid: true).trim();
+  }
+
+  /// Mojibake heuristic: a run of Latin-1 supplement chars with no CJK usually
+  /// means the bytes were UTF-8/GBK decoded as latin1.
+  static bool _looksMojibake(String value) {
+    if (_hasCjk(value)) return false;
+    final supplement = RegExp(
+      r'[À-ÿ]{2,}',
+    ).allMatches(value).length;
+    return supplement >= 2;
+  }
+
+  static bool _hasCjk(String value) => RegExp(
+    '[\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff]',
+  ).hasMatch(value);
+
+  /// True when [value] is plausible shelf metadata, not a product code.
+  @visibleForTesting
+  static bool looksLikeBookTitle(String value) {
+    final text = value.trim();
+    if (text.length < 2 || text.length > 80) return false;
+    // Pure digits / hex / id-ish tokens (ASIN, ISBN-ish, record ids).
+    if (RegExp(r'^[0-9]+$').hasMatch(text)) return false;
+    if (RegExp(r'^[0-9A-Fa-f]{6,}$').hasMatch(text)) return false;
+    if (RegExp(r'^(EBOK|BOOK|BOK|ITEM)[0-9A-Za-z\-_]*$', caseSensitive: false)
+        .hasMatch(text)) {
+      return false;
+    }
+    // Must contain at least one letter or CJK character.
+    if (!RegExp(r'[A-Za-z一-鿿㐀-䶿]').hasMatch(text)) return false;
+    // Reject strings that are mostly punctuation/symbols.
+    final letters = RegExp(r'[A-Za-z一-鿿㐀-䶿0-9]').allMatches(text).length;
+    return letters >= text.length * 0.4;
+  }
+
+  /// Spaced pinyin / romanisation heuristic (e.g. `hali bote`, `HaLi BoTe`).
+  @visibleForTesting
+  static bool looksLikePinyin(String value) {
+    final text = value.trim();
+    if (text.isEmpty || _hasCjk(text)) return false;
+    if (!RegExp(r'^[A-Za-z\s·-]+$').hasMatch(text)) return false;
+    final tokens = text
+        .split(RegExp(r'[\s·-]+'))
+        .where((token) => token.isNotEmpty)
+        .toList();
+    if (tokens.length < 2) return false;
+    var totalLen = 0;
+    var shortTokens = 0;
+    for (final token in tokens) {
+      totalLen += token.length;
+      if (token.length <= 6 && RegExp(r'^[A-Za-z]+$').hasMatch(token)) {
+        shortTokens++;
+      }
+    }
+    final avg = totalLen / tokens.length;
+    // Pinyin syllables cluster at 1–4 letters; English words run longer
+    // (`Harry Potter` avg≈5.5, `hali bote` avg≈4.0).
+    return avg <= 4.5 && shortTokens >= tokens.length * 0.8;
+  }
+
+  /// Scores a title candidate. Higher is better.
+  ///
+  /// Fanqie's `GetFullName` prefers the MOBI full-name field; when that is
+  /// missing or romanised, a CJK filename (用户命名的「哈利·波特」) beats
+  /// pinyin metadata.
+  @visibleForTesting
+  static int titleScore(String candidate, {required String fileTitle}) {
+    var score = 0;
+    if (!looksLikeBookTitle(candidate)) return -1000;
+    if (_hasCjk(candidate)) score += 100;
+    if (looksLikePinyin(candidate)) score -= 60;
+    // Filename has CJK but this candidate does not → likely pinyin/English id.
+    if (_hasCjk(fileTitle) && !_hasCjk(candidate)) score -= 40;
+    if (candidate.length >= 2 && candidate.length <= 40) score += 10;
+    if (candidate.length > 60) score -= 20;
+    return score;
+  }
+
   String _resolveTitle({
     required String filename,
     required String palmName,
     required String exthTitle,
+    required String fullName,
   }) {
-    final cleanedExth = pipeline.chapterTitle(exthTitle);
-    if (cleanedExth.isNotEmpty && cleanedExth.length > 2) return cleanedExth;
-    if (palmName.length > 2) return palmName;
-    return pipeline.titleFromFilename(filename);
+    final fileTitle = pipeline.titleFromFilename(filename);
+    final candidates = <String>[
+      exthTitle,
+      fullName,
+      palmName,
+      fileTitle,
+    ];
+    String? best;
+    var bestScore = -10000;
+    for (final raw in candidates) {
+      final cleaned = pipeline.chapterTitle(raw);
+      if (cleaned.isEmpty) continue;
+      final score = titleScore(cleaned, fileTitle: fileTitle);
+      if (score > bestScore) {
+        bestScore = score;
+        best = cleaned;
+      }
+    }
+    if (best != null && bestScore > 0) return best;
+    return fileTitle;
   }
 
   /// First record after the text block whose first four bytes match [magic].
@@ -416,19 +568,22 @@ class MobiDecoder {
       }
       final recordCount = data.getUint32(exthStart + 8, Endian.big);
       var cursor = exthStart + 12;
-      final isUtf8 = data.getUint32(header + 28, Endian.big) == 65001;
-      String decodePayload(List<int> payload) => isUtf8
-          ? utf8.decode(payload, allowMalformed: true)
-          : latin1.decode(payload, allowInvalid: true);
+      final declared = data.getUint32(header + 28, Endian.big);
       for (var i = 0; i < recordCount && cursor + 8 <= bytes.length; i++) {
         final type = data.getUint32(cursor, Endian.big);
         final length = data.getUint32(cursor + 4, Endian.big);
         if (length < 8 || cursor + length > bytes.length) break;
         final payload = bytes.sublist(cursor + 8, cursor + length);
         if (type == 100 && author.isEmpty) {
-          author = decodePayload(payload).trim();
+          author = _decodeMobiMetaString(
+            payload,
+            declaredEncoding: declared,
+          );
         } else if (type == 503 && updatedTitle.isEmpty) {
-          updatedTitle = decodePayload(payload).trim();
+          updatedTitle = _decodeMobiMetaString(
+            payload,
+            declaredEncoding: declared,
+          );
         } else if (type == 201 && payload.length >= 4) {
           coverOffset = ByteData.sublistView(payload).getUint32(0, Endian.big);
         }
@@ -644,16 +799,100 @@ class MobiDecoder {
 
     final entries = <BookTocEntry>[];
     final seen = <int>{};
+    var total = 0;
     for (var index = 0; index < matches.length; index++) {
-      final title = pipeline.chapterTitle(matches[index].group(2)!);
-      if (title.isEmpty) continue;
+      total++;
+      final title = cleanMobiTocTitle(matches[index].group(2) ?? '');
+      if (isDirtyTocTitle(title)) {
+        continue;
+      }
       final paragraphIndex = resolved[index].clamp(0, paragraphs.length - 1);
       if (!seen.add(paragraphIndex)) continue;
       entries.add(
         BookTocEntry(title: title, paragraphIndex: paragraphIndex),
       );
     }
+    // If most anchors were junk (encoding damage, HTML leftovers), drop the
+    // whole TOC so `chapterEntries` can rebuild from body-text heuristics
+    // instead of showing a half-broken catalog.
+    if (total > 0 && entries.length * 3 < total) {
+      return const [];
+    }
     return entries;
+  }
+
+  /// Aggressive TOC-label cleaner for MOBI `filepos` anchors.
+  ///
+  /// Fanqie's native parser feeds labels through `TTHtmlParser`; our anchors
+  /// often still carry tags, entities, control bytes or encoding damage.
+  @visibleForTesting
+  static String cleanMobiTocTitle(String raw) {
+    var text = raw;
+    // Decode entities first so escaped markup (`&lt;b&gt;`) becomes real tags
+    // and can be stripped in the next pass.
+    text = text.replaceAllMapped(RegExp(r'&(#x?[0-9A-Fa-f]+|[a-zA-Z]+);'), (
+      match,
+    ) {
+      final body = match.group(1)!;
+      if (body.startsWith('#')) {
+        final isHex = body.length > 2 && (body[1] == 'x' || body[1] == 'X');
+        final digits = isHex ? body.substring(2) : body.substring(1);
+        final code = int.tryParse(digits, radix: isHex ? 16 : 10);
+        if (code != null && code > 0 && code <= 0x10FFFF) {
+          return String.fromCharCode(code);
+        }
+        return ' ';
+      }
+      const named = {
+        'nbsp': ' ',
+        'amp': '&',
+        'lt': '<',
+        'gt': '>',
+        'quot': '"',
+        'apos': "'",
+        'hellip': '…',
+        'mdash': '—',
+        'ndash': '–',
+      };
+      return named[body.toLowerCase()] ?? ' ';
+    });
+    // Strip tags (including unterminated) and reader markers.
+    text = text.replaceAll(RegExp(r'<[^>]*>'), ' ');
+    text = text.replaceAll(RegExp(r'\[\[[^\]]*\]\]'), ' ');
+    // Second entity pass is unnecessary; filepos / control bytes next.
+    text = text.replaceAll(
+      RegExp('filepos\\s*=\\s*["\']?\\d+["\']?', caseSensitive: false),
+      ' ',
+    );
+    text = text.replaceAll(RegExp('[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]'), '');
+    // Collapse whitespace (incl. fullwidth / BOM residue).
+    text = text
+        .replaceAll('﻿', ' ')
+        .replaceAll('　', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return text;
+  }
+
+  /// True when a TOC label is unusable junk rather than a chapter name.
+  @visibleForTesting
+  static bool isDirtyTocTitle(String title) {
+    final text = title.trim();
+    if (text.length < 2 || text.length > 60) return true;
+    // Mojibake: Latin-1 supplement run without CJK (GBK/UTF-8 read as latin1).
+    if (!_hasCjk(text) && RegExp(r'[À-ÿ]{3,}').hasMatch(text)) return true;
+    // Replacement characters from failed decodes.
+    if (text.contains('�')) return true;
+    // Mostly symbols / punctuation / leftover markup glyphs.
+    final letters = RegExp(
+      r'[A-Za-z0-9一-鿿㐀-䶿]',
+    ).allMatches(text).length;
+    if (letters < text.length * 0.35) return true;
+    // Classic junk anchors: lone punctuation, "…" only, etc.
+    if (RegExp(r'^[\s\.\,\;\:\-\_\|\*\/\\\#\@\!\?…—–]+$').hasMatch(text)) {
+      return true;
+    }
+    return false;
   }
 
   /// True when a paragraph holds nothing but TOC markers.

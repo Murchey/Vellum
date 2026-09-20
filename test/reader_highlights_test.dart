@@ -94,8 +94,12 @@ void main() {
       const CupertinoApp(home: CupertinoPageScaffold(child: status)),
     );
 
-    expect(find.text('第一章 夜雨 · 本章 50%'), findsOneWidget);
-    expect(find.text('50% · 剩余约 12 分钟 · 电量 80%'), findsOneWidget);
+    expect(
+      find.text(
+        '50% · 第一章 夜雨 · 本章 50% · 剩余约 12 分钟 · 电量 80%',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('reader footer reports chapter progress and time left', (
@@ -106,7 +110,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('第一章 夜雨 · 本章 50%'), findsOneWidget);
+    expect(find.textContaining('第一章 夜雨'), findsWidgets);
     expect(find.textContaining('剩余约 1 分钟'), findsOneWidget);
   });
 

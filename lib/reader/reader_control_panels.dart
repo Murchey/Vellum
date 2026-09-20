@@ -1,4 +1,4 @@
-import 'package:flutter/cupertino.dart';
+﻿import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Scrollbar;
 
 import '../services/notes_library.dart';
@@ -17,13 +17,19 @@ class ReaderDirectoryPanel extends StatefulWidget {
     required this.onRemoveBookmark,
     required this.onRemoveNote,
     required this.onClose,
+    this.bookTitle = '',
+    this.surface,
     super.key,
   });
 
+  /// Fanqie reader catalog item height (`caloglayout/a.java` setItemHeight 54).
+  static const double itemExtent = 54;
+
+  /// Test-only alias so widget tests can assert the Fanqie height.
+  static const double itemExtentForTest = itemExtent;
+
   final List<MapEntry<int, String>> chapters;
   final List<MapEntry<int, String>> bookmarks;
-
-  /// This book's highlights and notes, newest first.
   final List<ReadingNote> notes;
   final Map<int, String> chapterPageLabels;
   final int currentParagraph;
@@ -32,6 +38,11 @@ class ReaderDirectoryPanel extends StatefulWidget {
   final Future<void> Function(int) onRemoveBookmark;
   final Future<void> Function(String) onRemoveNote;
   final VoidCallback onClose;
+  final String bookTitle;
+
+  /// Panel background (reading paper). Ink is derived from this so night
+  /// paper stays readable even when the app theme is light.
+  final Color? surface;
 
   @override
   State<ReaderDirectoryPanel> createState() => _ReaderDirectoryPanelState();
@@ -41,6 +52,8 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
   var _tab = 0;
   final _scrollController = ScrollController();
   var _didAutoScroll = false;
+
+  static const double itemExtent = ReaderDirectoryPanel.itemExtent;
 
   @override
   void initState() {
@@ -66,8 +79,31 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     return current >= paragraphIndex && current < next;
   }
 
-  /// Fanqie opens the catalog drawer already centred on the current chapter —
-  /// hunting for "where was I" is one of the main reasons a TOC feels clumsy.
+  /// Fanqie `wl5/e.M3` three-state title colour:
+  /// - current (`p3`): accent (`b5.n`) + left icon + title leftMargin 16
+  /// - read (`!z2 && progress > 0`): `yz4.j.y(theme, 0.6f)` body @ 60%
+  /// - unread: full body (`getReaderConfig().d1()`)
+  /// Vellum approximates Fanqie's per-chapter progress % as "chapter start
+  /// is strictly before the paragraph currently on screen".
+  bool _isReadChapter(int paragraphIndex) =>
+      paragraphIndex < widget.currentParagraph;
+
+  /// Fanqie `P3`/`S3` secondary labels (always 60% body):
+  /// - current: `读到 x/y 页` / `读到x%`
+  /// - read: `已读x%` / `上次读到 x/y 页`
+  /// - also word count / first-pass time when available.
+  String _readStateLabel(int paragraphIndex, bool isCurrent, bool isRead) {
+    if (widget.readingMode == ReadingMode.page) {
+      final page = widget.chapterPageLabels[paragraphIndex];
+      if (page != null && page.isNotEmpty) {
+        return isCurrent ? '读到 $page' : '上次读到 $page';
+      }
+    }
+    if (isCurrent) return '当前章节';
+    if (isRead) return '已读';
+    return '';
+  }
+
   void _autoScrollToCurrent() {
     if (_didAutoScroll || !_scrollController.hasClients) return;
     final entries = _tab == 0 ? widget.chapters : widget.bookmarks;
@@ -81,177 +117,238 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
       }
     }
     _didAutoScroll = true;
-    final itemExtent = 56.0;
     final maxOffset = _scrollController.position.maxScrollExtent;
-    final offset = (target * itemExtent - 80).clamp(0.0, maxOffset);
+    final offset = (target * itemExtent - 96).clamp(0.0, maxOffset);
     _scrollController.jumpTo(offset);
   }
 
-  String _secondaryLabel(int paragraphIndex, int index,
-      List<MapEntry<int, String>> entries) {
+  String _secondaryLabel(
+    int paragraphIndex,
+    bool isCurrent,
+    bool isRead,
+  ) {
     if (_tab == 1) return '第 ${paragraphIndex + 1} 段';
-    // Page mode: Fanqie shows a page number. Scroll mode: show nothing
-    // noisy — a raw paragraph index means nothing to a reader.
-    if (widget.readingMode == ReadingMode.page) {
-      return widget.chapterPageLabels[paragraphIndex] ?? '';
-    }
-    return '';
+    if (_tab == 2) return '';
+    return _readStateLabel(paragraphIndex, isCurrent, isRead);
   }
 
+  /// Fanqie caloglayout structure: book name → tabs → divider → list.
+  /// Parent supplies full band height; panel fills it.
   @override
   Widget build(BuildContext context) {
+    final surface = widget.surface ?? VellumTheme.readerChromeOf(context);
+    final ink = VellumTheme.readerChromeInk(surface);
+    final muted = ink.withValues(alpha: .55);
+    final accent = VellumTheme.accentOf(context);
     final entries = _tab == 0 ? widget.chapters : widget.bookmarks;
     final emptyMessage = switch (_tab) {
       0 => '这本书暂未识别出章节标题。',
       1 => '下拉阅读页面即可添加书签。',
       _ => '选中正文后可以划线或写笔记。',
     };
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenH = MediaQuery.sizeOf(context).height;
-        final maxH = constraints.maxHeight.isFinite
-            ? constraints.maxHeight
-            : screenH * .55;
-        // Fanqie's catalog drawer occupies roughly half the screen. The old
-        // 180–280px clamp only showed ~4 rows and forced constant scrolling.
-        final height = maxH.clamp(280.0, screenH * .55);
-        return SizedBox(
-          height: height,
-          child: Column(
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // 1) Book name (Fanqie V1: 14sp, alpha 0.4 day / 0.6 night)
+        if (widget.bookTitle.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+            child: Text(
+              widget.bookTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: ink.withValues(alpha: .45),
+                fontSize: 14,
+              ),
+            ),
+          ),
+
+        // 2) SlidingTabLayout-style tabs (Fanqie 16sp)
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(
             children: [
-              ReaderPanelTitle(
-                icon: switch (_tab) {
-                  0 => CupertinoIcons.list_bullet,
-                  1 => CupertinoIcons.bookmark,
-                  _ => CupertinoIcons.pencil_outline,
-                },
-                title: switch (_tab) {
-                  0 => '目录',
-                  1 => '书签',
-                  _ => '划线笔记',
-                },
-                onClose: widget.onClose,
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: CupertinoSlidingSegmentedControl<int>(
-                  groupValue: _tab,
-                  children: const {
-                    0: Text('目录'),
-                    1: Text('书签'),
-                    2: Text('笔记'),
-                  },
-                  onValueChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _tab = value);
-                    _didAutoScroll = false;
-                    WidgetsBinding.instance.addPostFrameCallback(
-                      (_) => _autoScrollToCurrent(),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: _tab == 2
-                    ? _buildNotes(context)
-                    : entries.isEmpty
-                    ? Center(
-                        child: Text(
-                          emptyMessage,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: VellumTheme.mutedOf(context),
-                          ),
-                        ),
-                      )
-                    : Scrollbar(
-                        controller: _scrollController,
-                        thumbVisibility: true,
-                        child: ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.only(bottom: 8),
-                          itemCount: entries.length,
-                          itemBuilder: (context, index) {
-                            final entry = entries[index];
-                            final isCurrentChapter =
-                                _tab == 0 &&
-                                _isCurrentChapter(entry.key, index, entries);
-                            final secondary = _secondaryLabel(
-                              entry.key,
-                              index,
-                              entries,
-                            );
-                            return CupertinoListTile(
-                              backgroundColor: isCurrentChapter
-                                  ? VellumTheme.softAccentOf(context)
-                                  : VellumTheme.cardOf(context),
-                              backgroundColorActivated: VellumTheme.lineOf(
-                                context,
-                              ),
-                              title: Text(
-                                entry.value,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isCurrentChapter
-                                      ? VellumTheme.accentOf(context)
-                                      : VellumTheme.inkOf(context),
-                                  fontWeight: isCurrentChapter
-                                      ? FontWeight.w600
-                                      : null,
-                                ),
-                              ),
-                              additionalInfo: secondary.isEmpty
-                                  ? null
-                                  : Text(
-                                      secondary,
-                                      style: TextStyle(
-                                        color: VellumTheme.mutedOf(context),
-                                      ),
-                                    ),
-                              trailing: _tab == 1
-                                  ? CupertinoButton(
-                                      padding: EdgeInsets.zero,
-                                      minimumSize: const Size(32, 32),
-                                      onPressed: () async {
-                                        await widget.onRemoveBookmark(entry.key);
-                                        if (mounted) setState(() {});
-                                      },
-                                      child: const Icon(
-                                        CupertinoIcons.delete,
-                                        size: 17,
-                                      ),
-                                    )
-                                  : isCurrentChapter
-                                  ? Icon(
-                                      CupertinoIcons.bookmark_fill,
-                                      size: 14,
-                                      color: VellumTheme.accentOf(context),
-                                    )
-                                  : null,
-                              onTap: () =>
-                                  widget.onJumpToParagraph(entry.key),
-                            );
-                          },
+              for (final (index, label) in [
+                (0, '目录'),
+                (1, '书签'),
+                (2, '笔记'),
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(right: 24),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      setState(() => _tab = index);
+                      _didAutoScroll = false;
+                      WidgetsBinding.instance.addPostFrameCallback(
+                        (_) => _autoScrollToCurrent(),
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          color: _tab == index ? accent : muted,
+                          fontSize: 16,
+                          fontWeight: _tab == index
+                              ? FontWeight.w600
+                              : FontWeight.w400,
                         ),
                       ),
+                    ),
+                  ),
+                ),
+              const Spacer(),
+              CupertinoButton(
+                padding: EdgeInsets.zero,
+                minimumSize: const Size(44, 44),
+                onPressed: widget.onClose,
+                child: Icon(
+                  CupertinoIcons.clear,
+                  size: 20,
+                  color: muted,
+                ),
               ),
             ],
           ),
-        );
-      },
+        ),
+
+        // 3) Divider (Fanqie alj / item: 0.5dp)
+        Container(height: 0.5, color: ink.withValues(alpha: .08)),
+
+        // 4) List — fills remaining height provided by parent
+        Expanded(
+          child: _tab == 2
+              ? _buildNotes(context)
+              : entries.isEmpty
+              ? Center(
+                  child: Text(
+                    emptyMessage,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: muted, fontSize: 14),
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: EdgeInsets.zero,
+                  itemCount: entries.length,
+                  itemExtent: itemExtent,
+                  itemBuilder: (context, index) {
+                    final entry = entries[index];
+                    final isCurrent =
+                        _tab == 0 &&
+                        _isCurrentChapter(entry.key, index, entries);
+                    // Fanqie wl5/e.M3: read = body @ 60% (`yz4.j.y(..., 0.6f)`).
+                    final isRead = _tab == 0 && _isReadChapter(entry.key);
+                    final titleColor = isCurrent
+                        ? accent
+                        : isRead
+                        ? ink.withValues(alpha: .6)
+                        : ink;
+                    // Fanqie S3/P3: secondary always at 60% body.
+                    final metaColor = ink.withValues(alpha: .45);
+                    final secondary = _secondaryLabel(
+                      entry.key,
+                      isCurrent,
+                      isRead,
+                    );
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => widget.onJumpToParagraph(entry.key),
+                      child: Container(
+                        // Fanqie reader catalog item: 54dp, padH 20dp
+                        // (caloglayout/a.java setItemHeight 54; avr 72 is audio).
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        decoration: BoxDecoration(
+                          border: Border(
+                            bottom: BorderSide(
+                              color: ink.withValues(alpha: .06),
+                              width: 0.5,
+                            ),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            if (isCurrent)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: Icon(
+                                  CupertinoIcons.bookmark_fill,
+                                  size: 14,
+                                  color: accent,
+                                ),
+                              ),
+                            Expanded(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    entry.value,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: titleColor,
+                                      fontSize: 15,
+                                      fontWeight: isCurrent
+                                          ? FontWeight.w600
+                                          : FontWeight.w400,
+                                    ),
+                                  ),
+                                  if (secondary.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      secondary,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: metaColor,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            if (_tab == 1)
+                              CupertinoButton(
+                                padding: EdgeInsets.zero,
+                                minimumSize: const Size(32, 32),
+                                onPressed: () async {
+                                  await widget.onRemoveBookmark(entry.key);
+                                  if (mounted) setState(() {});
+                                },
+                                child: Icon(
+                                  CupertinoIcons.delete,
+                                  size: 17,
+                                  color: muted,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
   Widget _buildNotes(BuildContext context) {
     final notes = widget.notes;
+    final surface = widget.surface ?? VellumTheme.readerChromeOf(context);
+    final ink = VellumTheme.readerChromeInk(surface);
+    final muted = ink.withValues(alpha: .55);
     if (notes.isEmpty) {
       return Center(
         child: Text(
           '选中正文后可以划线或写笔记。',
           textAlign: TextAlign.center,
-          style: TextStyle(color: VellumTheme.mutedOf(context)),
+          style: TextStyle(color: muted),
         ),
       );
     }
@@ -263,14 +360,14 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
         itemBuilder: (context, index) {
           final note = notes[index];
           return CupertinoListTile(
-            backgroundColor: VellumTheme.cardOf(context),
-            backgroundColorActivated: VellumTheme.lineOf(context),
+            backgroundColor: surface,
+            backgroundColorActivated: ink.withValues(alpha: .08),
             title: Text(
               note.selectedText,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: VellumTheme.inkOf(context),
+                color: ink,
                 backgroundColor: VellumTheme.accentOf(
                   context,
                 ).withValues(alpha: .18),
@@ -279,22 +376,22 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
             subtitle: note.note.trim().isEmpty
                 ? Text(
                     '${note.kind.label} · 第 ${note.paragraphIndex + 1} 段',
-                    style: TextStyle(color: VellumTheme.mutedOf(context)),
+                    style: TextStyle(color: muted),
                   )
                 : Text(
                     note.note.trim(),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: VellumTheme.mutedOf(context)),
+                    style: TextStyle(color: muted),
                   ),
             trailing: CupertinoButton(
               padding: EdgeInsets.zero,
-              minimumSize: const Size(32, 32),
+              minimumSize: const Size(44, 44),
               onPressed: () async {
                 await widget.onRemoveNote(note.id);
                 if (mounted) setState(() {});
               },
-              child: const Icon(CupertinoIcons.delete, size: 17),
+              child: Icon(CupertinoIcons.delete, size: 17, color: muted),
             ),
             onTap: () => widget.onJumpToParagraph(note.paragraphIndex),
           );
@@ -328,6 +425,7 @@ class ReaderSettingsPanel extends StatefulWidget {
     required this.onVolumeKeys,
     required this.onShowFonts,
     required this.onClose,
+    this.surface,
     super.key,
   });
 
@@ -337,8 +435,6 @@ class ReaderSettingsPanel extends StatefulWidget {
   final Color background;
   final ReadingMode readingMode;
   final PageTurnStyle pageTurnStyle;
-
-  /// `-1` follows the system brightness.
   final double brightness;
   final ReaderEyeCare eyeCare;
   final bool keepScreenOn;
@@ -355,14 +451,14 @@ class ReaderSettingsPanel extends StatefulWidget {
   final ValueChanged<bool> onVolumeKeys;
   final VoidCallback onShowFonts;
   final VoidCallback onClose;
+  final Color? surface;
 
   @override
   State<ReaderSettingsPanel> createState() => _ReaderSettingsPanelState();
 }
 
-/// Two levels on purpose: the front page keeps only the controls a reader
-/// reaches for mid-book (font size, brightness, paper), everything else lives
-/// behind 「更多设置」.
+/// First level keeps mid-book controls (mode, font size, paper, font,
+/// line spacing). Rarer options live behind 「更多设置」.
 class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
   bool _showMore = false;
 
@@ -370,95 +466,209 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
 
   bool get _followsSystem => widget.brightness < 0;
 
+  Color get _surface =>
+      widget.surface ?? VellumTheme.readerChromeOf(context);
+  Color get _ink => VellumTheme.readerChromeInk(_surface);
+  Color get _muted => _ink.withValues(alpha: .55);
+
   @override
-  Widget build(BuildContext context) => ConstrainedBox(
-    constraints: BoxConstraints(
-      maxHeight: MediaQuery.sizeOf(context).height * .48,
-    ),
-    child: AnimatedSize(
+  Widget build(BuildContext context) {
+    return AnimatedSize(
       duration: const Duration(milliseconds: 160),
       curve: Curves.easeOutCubic,
       alignment: Alignment.topCenter,
       child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: _showMore
               ? _moreSettings(context)
               : _mainSettings(context),
         ),
       ),
-    ),
-  );
+    );
+  }
+
+  Widget _optionGroup<T>({
+    required T groupValue,
+    required Map<T, String> options,
+    required ValueChanged<T> onChanged,
+  }) {
+    final ink = _ink;
+    final accent = VellumTheme.accentOf(context);
+    final surface = _surface;
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        color: ink.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          for (final entry in options.entries)
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => onChanged(entry.key),
+                child: Container(
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: groupValue == entry.key
+                        ? surface.withValues(alpha: .95)
+                        : const Color(0x00000000),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    entry.value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: groupValue == entry.key ? accent : ink,
+                      fontWeight: groupValue == entry.key
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   List<Widget> _mainSettings(BuildContext context) => [
     ReaderPanelTitle(
       icon: CupertinoIcons.gear,
       title: '阅读设置',
+      surface: _surface,
       onClose: widget.onClose,
     ),
-    _fontSizeRow(context),
-    const SizedBox(height: 10),
-    _brightnessRow(context),
-    const SizedBox(height: 10),
+    // Reading mode first — page vs scroll is the highest-frequency choice.
     ReaderSettingRow(
-      label: '背景',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children:
-            [
-                  VellumTheme.readerNight,
-                  VellumTheme.readerMint,
-                  VellumTheme.readerSepia,
-                  VellumTheme.readerCharcoal,
-                  VellumTheme.readerBlue,
-                  VellumTheme.readerWhite,
-                ]
-                .map(
-                  (color) => GestureDetector(
-                    onTap: () => widget.onBackground(color),
-                    child: Container(
-                      width: 28,
-                      height: 28,
-                      margin: const EdgeInsets.only(left: 8),
-                      decoration: BoxDecoration(
-                        color: color,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: widget.background == color
-                              ? VellumTheme.accentOf(context)
-                              : VellumTheme.lineOf(context),
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                )
-                .toList(),
+      label: '阅读方式',
+      surface: _surface,
+      child: _optionGroup<ReadingMode>(
+        groupValue: widget.readingMode,
+        options: const {
+          ReadingMode.scroll: '上下滚动',
+          ReadingMode.page: '左右翻页',
+        },
+        onChanged: widget.onReadingMode,
       ),
     ),
-    const SizedBox(height: 14),
-    Row(
-      children: [
-        Expanded(
-          child: _entryButton(
-            context,
-            icon: CupertinoIcons.textformat,
-            label: '字体',
-            detail: '系统 / 导入',
-            onTap: widget.onShowFonts,
-          ),
+    if (widget.readingMode == ReadingMode.page)
+      ReaderSettingRow(
+        label: '翻页效果',
+        surface: _surface,
+        child: _optionGroup<PageTurnStyle>(
+          groupValue: widget.pageTurnStyle,
+          options: {
+            for (final style in PageTurnStyle.values) style: style.label,
+          },
+          onChanged: widget.onPageTurnStyle,
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _entryButton(
-            context,
-            icon: CupertinoIcons.slider_horizontal_3,
-            label: '更多设置',
-            detail: '排版 / 常亮',
-            onTap: () => setState(() => _showMore = true),
-          ),
+      ),
+    _fontSizeRow(context),
+    ReaderSettingRow(
+      label: '亮度',
+      surface: _surface,
+      child: _brightnessRow(context),
+    ),
+    ReaderSettingRow(
+      label: '背景',
+      surface: _surface,
+      child: Row(
+        children: [
+          for (final color in [
+            VellumTheme.readerWhite,
+            VellumTheme.readerSepia,
+            VellumTheme.readerMint,
+            VellumTheme.readerBlue,
+            VellumTheme.readerCharcoal,
+            VellumTheme.readerNight,
+          ])
+            GestureDetector(
+              onTap: () => widget.onBackground(color),
+              child: Container(
+                width: 26,
+                height: 26,
+                margin: const EdgeInsets.only(right: 8),
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: widget.background == color
+                        ? VellumTheme.accentOf(context)
+                        : _ink.withValues(alpha: .2),
+                    width: widget.background == color ? 2 : 1,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    ),
+    // Font entry preserved (FontPickerSheet) — whole row is tappable.
+    GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onShowFonts,
+      child: ReaderSettingRow(
+        label: '字体',
+        surface: _surface,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '系统 / 导入',
+                style: TextStyle(fontSize: 13, color: _muted),
+              ),
+            ),
+            Icon(
+              CupertinoIcons.chevron_forward,
+              size: 16,
+              color: _muted,
+            ),
+          ],
         ),
-      ],
+      ),
+    ),
+    ReaderSettingRow(
+      label: '行间距',
+      surface: _surface,
+      child: _optionGroup<ReaderLineSpacing>(
+        groupValue: widget.lineSpacing,
+        options: {
+          for (final spacing in ReaderLineSpacing.values)
+            spacing: spacing.label,
+        },
+        onChanged: widget.onLineSpacing,
+      ),
+    ),
+    GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _showMore = true),
+      child: ReaderSettingRow(
+        label: '更多',
+        surface: _surface,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '更多设置',
+                style: TextStyle(fontSize: 13, color: _ink),
+              ),
+            ),
+            Icon(
+              CupertinoIcons.chevron_forward,
+              size: 16,
+              color: _muted,
+            ),
+          ],
+        ),
+      ),
     ),
   ];
 
@@ -466,79 +676,32 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     ReaderPanelTitle(
       icon: CupertinoIcons.slider_horizontal_3,
       title: '更多设置',
+      surface: _surface,
       onClose: widget.onClose,
       onBack: () => setState(() => _showMore = false),
     ),
     ReaderSettingRow(
-      label: '阅读方式',
-      child: CupertinoSlidingSegmentedControl<ReadingMode>(
-        groupValue: widget.readingMode,
-        children: const {
-          ReadingMode.scroll: Text('上下滚动'),
-          ReadingMode.page: Text('左右翻页'),
-        },
-        onValueChanged: (value) {
-          if (value != null) widget.onReadingMode(value);
-        },
-      ),
-    ),
-    const SizedBox(height: 10),
-    if (widget.readingMode == ReadingMode.page) ...[
-      ReaderSettingRow(
-        label: '翻页效果',
-        child: CupertinoSlidingSegmentedControl<PageTurnStyle>(
-          groupValue: widget.pageTurnStyle,
-          children: {
-            for (final style in PageTurnStyle.values) style: Text(style.label),
-          },
-          onValueChanged: (value) {
-            if (value != null) widget.onPageTurnStyle(value);
-          },
-        ),
-      ),
-      const SizedBox(height: 10),
-    ],
-    ReaderSettingRow(
-      label: '行间距',
-      child: CupertinoSlidingSegmentedControl<ReaderLineSpacing>(
-        groupValue: widget.lineSpacing,
-        children: {
-          for (final spacing in ReaderLineSpacing.values)
-            spacing: Text(spacing.label),
-        },
-        onValueChanged: (value) {
-          if (value != null) widget.onLineSpacing(value);
-        },
-      ),
-    ),
-    const SizedBox(height: 10),
-    ReaderSettingRow(
       label: '字重',
-      child: CupertinoSlidingSegmentedControl<ReaderFontWeight>(
+      surface: _surface,
+      child: _optionGroup<ReaderFontWeight>(
         groupValue: widget.readerFontWeight,
-        children: {
-          for (final weight in ReaderFontWeight.values)
-            weight: Text(weight.label),
+        options: {
+          for (final weight in ReaderFontWeight.values) weight: weight.label,
         },
-        onValueChanged: (value) {
-          if (value != null) widget.onReaderFontWeight(value);
-        },
+        onChanged: widget.onReaderFontWeight,
       ),
     ),
-    const SizedBox(height: 10),
     ReaderSettingRow(
       label: '护眼',
-      child: CupertinoSlidingSegmentedControl<ReaderEyeCare>(
+      surface: _surface,
+      child: _optionGroup<ReaderEyeCare>(
         groupValue: widget.eyeCare,
-        children: {
-          for (final level in ReaderEyeCare.values) level: Text(level.label),
+        options: {
+          for (final level in ReaderEyeCare.values) level: level.label,
         },
-        onValueChanged: (value) {
-          if (value != null) widget.onEyeCare(value);
-        },
+        onChanged: widget.onEyeCare,
       ),
     ),
-    const SizedBox(height: 6),
     _switchRow(
       context,
       label: '常亮',
@@ -555,71 +718,69 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     ),
   ];
 
-  Widget _fontSizeRow(BuildContext context) => Row(
-    children: [
-      Text('字号', style: TextStyle(color: VellumTheme.mutedOf(context))),
-      CupertinoButton(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        minimumSize: Size.zero,
-        onPressed: () =>
-            widget.onFontSize((widget.fontSize - 1).clamp(16, 36)),
-        child: const Text('A−'),
-      ),
-      Expanded(
-        child: CupertinoSlider(
-          value: widget.fontSize,
-          min: 16,
-          max: 36,
-          onChanged: widget.onFontSize,
-        ),
-      ),
-      CupertinoButton(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        minimumSize: Size.zero,
-        onPressed: () =>
-            widget.onFontSize((widget.fontSize + 1).clamp(16, 36)),
-        child: const Text('A+'),
-      ),
-      Text(
-        '${widget.fontSize.round()}',
-        style: TextStyle(color: VellumTheme.mutedOf(context)),
-      ),
-    ],
-  );
-
-  Widget _brightnessRow(BuildContext context) => ReaderSettingRow(
-    label: '亮度',
+  Widget _fontSizeRow(BuildContext context) => ReaderSettingRow(
+    label: '字号',
+    surface: _surface,
     child: Row(
       children: [
-        Icon(
-          CupertinoIcons.sun_min,
-          size: 16,
-          color: VellumTheme.mutedOf(context),
+        CupertinoButton(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          minimumSize: const Size(36, 36),
+          onPressed: () =>
+              widget.onFontSize((widget.fontSize - 1).clamp(16, 36)),
+          child: Text('A−', style: TextStyle(fontSize: 14, color: _ink)),
         ),
         Expanded(
           child: CupertinoSlider(
-            value: _followsSystem ? 0.6 : widget.brightness,
-            min: 0.05,
-            max: 1,
-            onChanged: widget.onBrightness,
+            value: widget.fontSize.clamp(16, 36),
+            min: 16,
+            max: 36,
+            onChanged: widget.onFontSize,
           ),
         ),
         CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          minimumSize: Size.zero,
-          onPressed: () => widget.onBrightness(_followSystemBrightness),
+          minimumSize: const Size(36, 36),
+          onPressed: () =>
+              widget.onFontSize((widget.fontSize + 1).clamp(16, 36)),
+          child: Text('A+', style: TextStyle(fontSize: 14, color: _ink)),
+        ),
+        SizedBox(
+          width: 28,
           child: Text(
-            _followsSystem ? '跟随系统' : '恢复跟随',
-            style: TextStyle(
-              fontSize: 12,
-              color: _followsSystem
-                  ? VellumTheme.mutedOf(context)
-                  : VellumTheme.accentOf(context),
-            ),
+            '${widget.fontSize.round()}',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, color: _muted),
           ),
         ),
       ],
     ),
+  );
+
+  Widget _brightnessRow(BuildContext context) => Row(
+    children: [
+      Icon(CupertinoIcons.sun_min, size: 16, color: _muted),
+      Expanded(
+        child: CupertinoSlider(
+          value: (_followsSystem ? 0.6 : widget.brightness).clamp(0.05, 1.0),
+          min: 0.05,
+          max: 1,
+          onChanged: widget.onBrightness,
+        ),
+      ),
+      CupertinoButton(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        minimumSize: const Size(0, 36),
+        onPressed: () => widget.onBrightness(_followSystemBrightness),
+        child: Text(
+          _followsSystem ? '跟随系统' : '恢复跟随',
+          style: TextStyle(
+            fontSize: 12,
+            color: _followsSystem ? _muted : VellumTheme.accentOf(context),
+          ),
+        ),
+      ),
+    ],
   );
 
   Widget _switchRow(
@@ -630,73 +791,17 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     required ValueChanged<bool> onChanged,
   }) => ReaderSettingRow(
     label: label,
+    surface: _surface,
     child: Row(
       children: [
         Expanded(
           child: Text(
             detail,
-            style: TextStyle(fontSize: 13, color: VellumTheme.mutedOf(context)),
+            style: TextStyle(fontSize: 12, color: _muted),
           ),
         ),
         CupertinoSwitch(value: value, onChanged: onChanged),
       ],
-    ),
-  );
-
-  /// Secondary-entry tile: icon + label + hint, tapping opens its own screen.
-  Widget _entryButton(
-    BuildContext context, {
-    required IconData icon,
-    required String label,
-    required String detail,
-    required VoidCallback onTap,
-  }) => CupertinoButton(
-    padding: EdgeInsets.zero,
-    onPressed: onTap,
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: VellumTheme.cardOf(context),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: VellumTheme.lineOf(context)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: VellumTheme.accentOf(context)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: VellumTheme.inkOf(context),
-                  ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  detail,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: VellumTheme.mutedOf(context),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Icon(
-            CupertinoIcons.chevron_right,
-            size: 13,
-            color: VellumTheme.mutedOf(context),
-          ),
-        ],
-      ),
     ),
   );
 }
@@ -707,76 +812,94 @@ class ReaderPanelTitle extends StatelessWidget {
     required this.title,
     required this.onClose,
     this.onBack,
+    this.surface,
     super.key,
   });
 
   final IconData icon;
   final String title;
   final VoidCallback onClose;
-
-  /// Shown on secondary pages to return to the parent panel.
   final VoidCallback? onBack;
+  final Color? surface;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
-    child: Row(
-      children: [
-        if (onBack != null)
+  Widget build(BuildContext context) {
+    final bg = surface ?? VellumTheme.readerChromeOf(context);
+    final ink = VellumTheme.readerChromeInk(bg);
+    final muted = ink.withValues(alpha: .55);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
+      child: Row(
+        children: [
+          if (onBack != null)
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(40, 36),
+              onPressed: onBack,
+              child: Icon(
+                CupertinoIcons.chevron_back,
+                size: 20,
+                color: muted,
+              ),
+            )
+          else
+            Icon(icon, size: 18, color: VellumTheme.accentOf(context)),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: TextStyle(
+              color: ink,
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const Spacer(),
           CupertinoButton(
             padding: EdgeInsets.zero,
-            minimumSize: const Size(28, 28),
-            onPressed: onBack,
-            child: Icon(
-              CupertinoIcons.chevron_back,
-              size: 18,
-              color: VellumTheme.mutedOf(context),
-            ),
-          )
-        else
-          Icon(icon, size: 18, color: VellumTheme.accentOf(context)),
-        const SizedBox(width: 8),
-        Text(
-          title,
-          style: TextStyle(
-            color: VellumTheme.inkOf(context),
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+            minimumSize: const Size(44, 36),
+            onPressed: onClose,
+            child: Icon(CupertinoIcons.chevron_down, size: 20, color: muted),
           ),
-        ),
-        const Spacer(),
-        CupertinoButton(
-          padding: EdgeInsets.zero,
-          minimumSize: const Size(32, 28),
-          onPressed: onClose,
-          child: const Icon(CupertinoIcons.chevron_down, size: 18),
-        ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
 }
 
 class ReaderSettingRow extends StatelessWidget {
   const ReaderSettingRow({
     required this.label,
     required this.child,
+    this.surface,
     super.key,
   });
 
   final String label;
   final Widget child;
+  final Color? surface;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      SizedBox(
-        width: 58,
-        child: Text(
-          label,
-          style: TextStyle(color: VellumTheme.mutedOf(context)),
+  Widget build(BuildContext context) {
+    final bg = surface ?? VellumTheme.readerChromeOf(context);
+    final muted = VellumTheme.readerChromeInk(bg).withValues(alpha: .55);
+    return Padding(
+      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+      child: SizedBox(
+        height: 40,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 56,
+              child: Text(
+                label,
+                style: TextStyle(color: muted, fontSize: 12),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: child),
+          ],
         ),
       ),
-      Expanded(child: child),
-    ],
-  );
+    );
+  }
 }

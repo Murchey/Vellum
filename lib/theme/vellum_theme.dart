@@ -89,14 +89,17 @@ abstract final class VellumTheme {
 
   static Color inkOf(BuildContext context) =>
       CupertinoTheme.of(context).brightness == Brightness.dark ? darkInk : ink;
-  static const readerNight = Color(0xff0e0e0e);
-  static const readerNightInk = Color(0xffb5b5b5);
-  static const readerMint = Color(0xffe4f0d8);
-  static const readerSepia = Color(0xffe8e3cf);
-  static const readerCharcoal = Color(0xff262626);
-  static const readerCharcoalInk = Color(0xff929292);
-  static const readerBlue = Color(0xffd8e4f0);
-  static const readerWhite = Color(0xffffffff);
+  // Fanqie reader theme palette (colors.xml reader_*_theme_bg_light).
+  // Night = Fanqie theme 5 (#262626 / ink #B7B7B7); Charcoal is a deeper
+  // dark variant so readerInkFor can distinguish the two dark papers.
+  static const readerNight = Color(0xff262626);
+  static const readerNightInk = Color(0xffb7b7b7);
+  static const readerMint = Color(0xffc9decb);
+  static const readerSepia = Color(0xfff7e4cf);
+  static const readerCharcoal = Color(0xff1a1a1a);
+  static const readerCharcoalInk = Color(0xff8c8c8c);
+  static const readerBlue = Color(0xffc2def0);
+  static const readerWhite = Color(0xffd7d7db);
 
   static Color readerInkFor(Color background) {
     if (background == darkPaper) return CupertinoColors.white;
@@ -121,10 +124,19 @@ abstract final class VellumTheme {
       CupertinoTheme.of(context).brightness == Brightness.dark
       ? darkCard
       : card;
-  static Color readerChromeOf(BuildContext context) =>
-      CupertinoTheme.of(context).brightness == Brightness.dark
-      ? darkPaper
-      : card;
+  /// Reader chrome surface. Prefer the active reading paper so menu bars
+  /// sit on the same colour as the page (Fanqie menu uses theme bg).
+  /// Falls back to app card/darkPaper when no paper is supplied.
+  static Color readerChromeOf(BuildContext context, {Color? paper}) {
+    if (paper != null) return paper;
+    return CupertinoTheme.of(context).brightness == Brightness.dark
+        ? darkPaper
+        : card;
+  }
+
+  /// Ink for chrome painted on [surface] — always contrast-safe on reader
+  /// papers (night/charcoal/sepia/…), independent of app light/dark mode.
+  static Color readerChromeInk(Color surface) => readerInkFor(surface);
 
   static Color softAccentOf(BuildContext context) => accentOf(
     context,

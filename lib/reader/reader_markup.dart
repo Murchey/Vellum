@@ -28,8 +28,9 @@ abstract final class ReaderMarkup {
       .replaceAll(inlineTag, '')
       .replaceAll(inlineImage, '');
 
-  /// TOC filepos can land on a body paragraph; only short title-like text
-  /// is treated as a heading.
+  /// TOC filepos / synthetic entries can land on body prose. A paragraph is a
+  /// heading only when the *text itself* looks like a chapter title — not
+  /// merely because some TOC row points at it.
   static bool looksLikeHeadingText(String source) {
     final plain = source.trim();
     if (plain.isEmpty || plain.length > 48) return false;
@@ -41,6 +42,94 @@ abstract final class ReaderMarkup {
         !plain.contains(';');
   }
 
+  static final RegExp _chapterTitle = RegExp(
+    r'^(第[0-9一二三四五六七八九十百千万零〇两壹贰叁肆伍陆柒捌玖拾]{1,12}'
+    r'(?:章节|章|册|卷|部|回|节|回合|集|篇|话)|'
+    r'(?:Chapter|CHAPTER|Part|PART)\s*\d+|'
+    r'序章|序言|前言|引子|楔子|尾声|后记|番外|附录|后序|跋|内容简介|作品简介)$',
+  );
+
+  /// True when [plain] is title-shaped (chapter head, short label), not body.
+  static bool looksLikeChapterTitle(String plain) {
+    final t = plain.trim();
+    if (t.isEmpty || t.length > 40) return false;
+    if (_chapterTitle.hasMatch(t)) return true;
+    if (RegExp(r'^【[^】]{1,20}】$').hasMatch(t)) return true;
+    if (RegExp(r'^\[[^\]]{1,20}\]$').hasMatch(t)) return true;
+    // Short punctuation-free labels still count; anything with sentence
+    // punctuation is prose and must keep first-line indent.
+    return t.length <= 16 &&
+        !t.contains('。') &&
+        !t.contains('，') &&
+        !t.contains('？') &&
+        !t.contains('！') &&
+        !t.contains('；') &&
+        !t.contains('、') &&
+        !t.contains(',') &&
+        !t.contains(';') &&
+        !t.contains('…');
+  }
+
+  /// Body prose that must receive the two-space first-line indent even when a
+  /// decoder slapped center/list-ish flags on the whole book layout.
+  static bool looksLikeBodyProse(String plain) {
+    final t = plain.trim();
+    if (t.isEmpty) return false;
+    if (looksLikeChapterTitle(t)) return false;
+    if (t.contains('。') ||
+        t.contains('！') ||
+        t.contains('？') ||
+        t.contains('…') ||
+        t.contains('!') ||
+        t.contains('?')) {
+      return true;
+    }
+    if (t.length >= 40) return true;
+    return t.length >= 24 &&
+        (t.contains('，') || t.contains('、') || t.contains(','));
+  }
+
+  /// Source already carries a first-line indent — display must not double it.
+  static bool alreadyHasFirstLineIndent(String source) {
+    final t = readerText(source);
+    if (t.isEmpty) return false;
+    return t.startsWith('　') ||
+        t.startsWith('\u00A0') ||
+        t.startsWith('\u2007') ||
+        t.startsWith('\t') ||
+        RegExp(r'^ {2,}').hasMatch(t);
+  }
+
+  /// Shared rule for render + pagination: should this paragraph show the
+  /// Chinese body indent `　　`?
+  static bool shouldIndentFirstLine({
+    required String paragraph,
+    required String fullParagraph,
+    required int? headingLevel,
+    required bool isQuote,
+    required bool isList,
+    required bool isCenter,
+  }) {
+    if (headingLevel != null) return false;
+    if (isQuote) return false;
+    if (isList) return false;
+    // Center is only trusted for short title-like lines. Whole-book EPUB
+    // layouts often set text-align:center on every block — body prose still
+    // needs indent or the book reads flush-left with no paragraph rhythm.
+    if (isCenter && !looksLikeBodyProse(readerText(fullParagraph))) {
+      return false;
+    }
+    if (alreadyHasFirstLineIndent(paragraph) ||
+        alreadyHasFirstLineIndent(fullParagraph)) {
+      return false;
+    }
+    final plain = readerText(fullParagraph).trim();
+    if (plain.isEmpty) return false;
+    // Standalone image / marker-only paragraphs stay unindented.
+    if (stripAllMarkers(fullParagraph).trim().isEmpty) return false;
+    return true;
+  }
+
   static int? effectiveHeadingLevel({
     required String paragraph,
     required String fullParagraph,
@@ -49,7 +138,11 @@ abstract final class ReaderMarkup {
     final match = heading.firstMatch(paragraph) ?? heading.firstMatch(fullParagraph);
     final level = int.tryParse(match?.group(1) ?? '');
     if (level != null) return level;
-    if (isTocEntry && looksLikeHeadingText(readerText(fullParagraph))) return 2;
+    if (!isTocEntry) return null;
+    final plain = readerText(fullParagraph).trim();
+    // TOC target is a heading only when the paragraph itself is title-shaped.
+    // Synthetic 第N章 markers that land on body prose must keep indent.
+    if (looksLikeChapterTitle(plain)) return 2;
     return null;
   }
 

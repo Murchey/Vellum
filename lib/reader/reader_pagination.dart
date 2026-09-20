@@ -217,11 +217,23 @@ class ProgressiveBookPager {
     }
 
     final plainSource = ReaderMarkup.stripAllMarkers(source);
-    // Headings are centered without first-line indent; body uses two spaces.
+    // Same indent rule as ReaderParagraph — measure with the same `　　`
+    // prefix the page will render, or page-mode layout drifts from scroll.
+    final isQuote = ReaderMarkup.quote.hasMatch(source);
+    final isList = ReaderMarkup.list.hasMatch(source);
+    final isCenter = ReaderMarkup.center.hasMatch(source);
     final isHeading = headingLevel != null;
+    final willIndent = ReaderMarkup.shouldIndentFirstLine(
+      paragraph: source,
+      fullParagraph: source,
+      headingLevel: headingLevel,
+      isQuote: isQuote,
+      isList: isList,
+      isCenter: isCenter,
+    );
     final displaySource = plainSource.isEmpty
         ? plainSource
-        : (isHeading ? plainSource : '　　$plainSource');
+        : (willIndent ? '　　$plainSource' : plainSource);
     final measureStyle = isHeading
         ? TextStyle(
             fontFamily: _config.fontFamily,
@@ -294,8 +306,13 @@ class ProgressiveBookPager {
       pages.last.add(
         PageFragment(
           paragraphIndex: index,
-          text: sliceDisplayText(plainSource, fragmentStart, fragmentEnd),
-          indentFirstLine: firstFragment,
+          text: sliceDisplayText(
+            plainSource,
+            fragmentStart,
+            fragmentEnd,
+            indentPrefixLength: willIndent ? 2 : 0,
+          ),
+          indentFirstLine: firstFragment && willIndent,
           showImage: firstFragment && hasImage,
           showLinkAction: isLastFragment && hasLink,
         ),

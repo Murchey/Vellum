@@ -40,13 +40,14 @@ void main() {
   });
 
   test('reader papers keep their exact requested text contrast', () {
+    // Fanqie ReaderCommonColor ink pairs (theme 5 / 7 night grays).
     expect(
       VellumTheme.readerInkFor(VellumTheme.darkPaper),
       CupertinoColors.white,
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerNight),
-      const Color(0xffb5b5b5),
+      const Color(0xffb7b7b7),
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerMint),
@@ -58,7 +59,7 @@ void main() {
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerCharcoal),
-      const Color(0xff929292),
+      const Color(0xff8c8c8c),
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerBlue),
@@ -135,45 +136,43 @@ void main() {
     expect(find.byType(CupertinoNavigationBar), findsNothing);
 
     await tester.tapAt(const Offset(400, 300));
-    // Controls slide in over ~200ms; wait for the animation before hit-testing.
+    // Fanqie menu chrome animates 300ms.
     await tester.pumpAndSettle();
 
     expect(find.byType(CupertinoNavigationBar), findsNothing);
     expect(find.text('测试书'), findsWidgets);
-    expect(find.text('0%'), findsOneWidget);
+    // Fanqie action row: 目录 | 日间/夜间 | 设置（字体在设置面板内）
     expect(find.text('目录'), findsOneWidget);
-    expect(find.text('字体'), findsOneWidget);
-    expect(find.text('深色'), findsOneWidget);
     expect(find.text('设置'), findsOneWidget);
+    expect(find.text('上一章'), findsOneWidget);
+    expect(find.text('下一章'), findsOneWidget);
     expect(find.text('阅读方式'), findsNothing);
 
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
 
-    // 一级只留高频三项，其余收进二级菜单。
+    // First level: mode + font size + brightness + paper + font + line space.
+    // Reading mode stays on the front page — burying it hurt usability.
     expect(find.text('阅读设置'), findsOneWidget);
+    expect(find.text('阅读方式'), findsOneWidget);
+    expect(find.text('字号'), findsOneWidget);
     expect(find.text('亮度'), findsOneWidget);
     expect(find.text('背景'), findsOneWidget);
+    expect(find.text('字体'), findsOneWidget);
+    expect(find.text('行间距'), findsOneWidget);
     expect(find.text('更多设置'), findsOneWidget);
-    expect(find.text('阅读方式'), findsNothing);
     expect(find.text('字重'), findsNothing);
     expect(find.text('常亮'), findsNothing);
 
     await tester.tap(find.text('更多设置'));
     await tester.pumpAndSettle();
 
-    expect(find.text('更多设置'), findsWidgets);
-    expect(find.text('阅读方式'), findsOneWidget);
-    expect(find.text('上下滚动'), findsOneWidget);
-    expect(find.text('左右翻页'), findsOneWidget);
-    expect(find.text('行间距'), findsOneWidget);
     expect(find.text('字重'), findsOneWidget);
     expect(find.text('护眼'), findsOneWidget);
     expect(find.text('常亮'), findsOneWidget);
     expect(find.text('音量键'), findsOneWidget);
-    expect(find.text('字号'), findsNothing);
 
-    // 顶栏也有一个 chevron_back，返回二级菜单必须限定在设置面板内部。
+    // Panel-internal back returns to first-level settings only.
     await tester.tap(
       find.descendant(
         of: find.byType(ReaderSettingsPanel),
@@ -183,7 +182,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('阅读设置'), findsOneWidget);
-    expect(find.text('阅读方式'), findsNothing);
+    expect(find.text('阅读方式'), findsOneWidget);
+    expect(find.text('字重'), findsNothing);
     expect(find.byType(SelectableText), findsOneWidget);
   });
 
@@ -244,7 +244,10 @@ void main() {
     );
     await tester.tapAt(const Offset(400, 300));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('字体').last);
+    // Fanqie structure: 字体 lives inside the settings panel.
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('字体'));
     await tester.pumpAndSettle();
 
     expect(find.text('阅读字体'), findsOneWidget);
@@ -376,10 +379,8 @@ void main() {
     );
     await tester.tapAt(const Offset(400, 300));
     await tester.pumpAndSettle();
+    // Reading mode is on the first settings level (usability).
     await tester.tap(find.text('设置'));
-    await tester.pumpAndSettle();
-    // Reading mode now lives behind the 「更多设置」 second level.
-    await tester.tap(find.text('更多设置'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('左右翻页'));
     await tester.pump();

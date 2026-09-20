@@ -4,10 +4,17 @@ Uri buildBingSearchUri(String query) {
 }
 
 /// Safe slice of [plain] using offsets measured on indent+plain display text.
+/// [indentPrefixLength] is how many display characters were prefixed before
+/// [plain] when measuring (2 for `　　`, 0 when the paragraph will not indent).
 /// Prevents RangeError when TextPainter offsets are reversed or out of range.
-String sliceDisplayText(String plain, int displayStart, int displayEnd) {
-  final start = (displayStart - 2).clamp(0, plain.length);
-  final end = (displayEnd - 2).clamp(start, plain.length);
+String sliceDisplayText(
+  String plain,
+  int displayStart,
+  int displayEnd, {
+  int indentPrefixLength = 2,
+}) {
+  final start = (displayStart - indentPrefixLength).clamp(0, plain.length);
+  final end = (displayEnd - indentPrefixLength).clamp(start, plain.length);
   return plain.substring(start, end);
 }
 

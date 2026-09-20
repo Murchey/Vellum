@@ -853,6 +853,14 @@ class _ReaderPageState extends State<ReaderPage>
     _scheduleSave();
   }
 
+  /// Fanqie progress semantics: SeekBar drives chapter index, not 0–100%.
+  void _jumpToChapter(int chapterIndex) {
+    final entries = _chapters;
+    if (entries.isEmpty) return;
+    final index = chapterIndex.clamp(0, entries.length - 1);
+    _jumpToParagraph(entries[index].key);
+  }
+
   void _jumpToScrollParagraph(int target) {
     final count = widget.book.paragraphs.length;
     if (count == 0 || !_scrollController.hasClients) return;
@@ -949,58 +957,88 @@ class _ReaderPageState extends State<ReaderPage>
     final progress = (_pullDownDistance / threshold).clamp(0.0, 1.2);
     final armed = _pullDownDistance >= threshold;
     final already = _isCurrentViewBookmarked;
-    final icon = already
-        ? CupertinoIcons.bookmark_fill
-        : CupertinoIcons.bookmark;
+    final accent = VellumTheme.accentOf(context);
     final label = already
         ? (armed ? '松开取消书签' : '下拉取消书签')
         : (armed ? '松开添加书签' : '下拉添加书签');
-    final accent = VellumTheme.accentOf(context);
+    // Ribbon length tracks the pull — Fanqie draws a bookmark ribbon that
+    // extends from the top edge, which reads much clearer than a floating pill.
+    final ribbonLength = (28 + progress * 52).clamp(28.0, 90.0);
+    final ribbonColor = armed
+        ? accent
+        : (already
+              ? accent.withValues(alpha: .55)
+              : VellumTheme.mutedOf(context).withValues(alpha: .7));
 
     return IgnorePointer(
       child: SafeArea(
         child: Align(
           alignment: Alignment.topCenter,
-          child: Transform.translate(
-            offset: Offset(0, -8 + (_pullDownDistance * 0.35).clamp(0.0, 48)),
-            child: Opacity(
-              opacity: (progress).clamp(0.15, 1.0),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 8,
-                ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Bookmark ribbon sliding down from the top edge.
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 60),
+                width: 22,
+                height: ribbonLength,
                 decoration: BoxDecoration(
-                  color: VellumTheme.readerChromeOf(context).withValues(
-                    alpha: .96,
+                  color: ribbonColor,
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(4),
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: VellumTheme.lineOf(context)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Transform.rotate(
-                      angle: (1 - progress.clamp(0.0, 1.0)) * 0.6,
-                      child: Icon(
-                        icon,
-                        size: 18,
-                        color: armed ? accent : VellumTheme.mutedOf(context),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      label,
-                      style: TextStyle(
-                        color: armed ? accent : VellumTheme.inkOf(context),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: CupertinoColors.black.withValues(alpha: .12),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
                     ),
                   ],
                 ),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Icon(
+                      armed || already
+                          ? CupertinoIcons.bookmark_fill
+                          : CupertinoIcons.bookmark,
+                      size: 14,
+                      color: CupertinoColors.white,
+                    ),
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(height: 6),
+              Opacity(
+                opacity: progress.clamp(0.25, 1.0),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: VellumTheme.readerChromeOf(context).withValues(
+                      alpha: .94,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: armed
+                          ? accent.withValues(alpha: .55)
+                          : VellumTheme.lineOf(context),
+                    ),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: armed ? accent : VellumTheme.inkOf(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
@@ -1016,13 +1054,12 @@ bool _isScrollIdle() => true;
   void _handleReaderPointerMove(PointerMoveEvent event) {
     final down = _readerPointerDownPosition;
     if (down == null) return;
-    // Fanqie closes the reader chrome as soon as the finger moves past
-    // touch-slop — leaving the menu open while the user is clearly trying to
-    // turn/scroll is a major source of "this feels broken".
+    // Only treat a clear intentional slide as "dismiss chrome". A 18px
+    // threshold made every careful tap near a button feel broken.
     if (_showControls) {
       final dx = event.position.dx - down.dx;
       final dy = event.position.dy - down.dy;
-      if (dx * dx + dy * dy > 18 * 18) {
+      if (dx * dx + dy * dy > 72 * 72) {
         setState(() => _showControls = false);
       }
     }
@@ -1093,7 +1130,19 @@ bool _isScrollIdle() => true;
     return CupertinoPageScaffold(
       backgroundColor: _backgroundFor(context),
       navigationBar: null,
-      child: SafeArea(
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          // System/edge back: chrome first, then leave the reader.
+          if (_showControls) {
+            setState(() => _showControls = false);
+            return;
+          }
+          final navigator = Navigator.of(context);
+          if (navigator.canPop()) navigator.pop();
+        },
+        child: SafeArea(
         child: Stack(
           children: [
             Localizations.override(
@@ -1284,34 +1333,16 @@ bool _isScrollIdle() => true;
                   ),
                 ),
               ),
+            // Fanqie BottomIndicator slot: bottom-center, marginBottom 18dp,
+            // visible only while the menu is hidden.
             if (!_showControls)
               ReaderStatusBar(
                 progressLabel: _pageProgress,
                 batteryLabel: _batteryText,
                 chapterLabel: _chapterLabel,
                 remainingLabel: _remainingLabel,
+                surface: _backgroundFor(context),
               ),
-            // Controls slide + fade instead of popping in — Fanqie's chrome
-            // animates, and a hard cut is one of the main reasons an overlay
-            // feels "janky" even when the reader itself is fine.
-            AnimatedSlide(
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
-              offset: _showControls ? Offset.zero : const Offset(0, -1),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
-                opacity: _showControls ? 1 : 0,
-                child: _showControls
-                    ? ReaderHeaderPanel(
-                        title: widget.book.title,
-                        onBack: () => Navigator.of(context).maybePop(),
-                        bookmarked: _isCurrentViewBookmarked,
-                        onToggleBookmark: _toggleBookmarkAtCurrentPosition,
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ),
             if (_isCurrentViewBookmarked)
               IgnorePointer(
                 child: SafeArea(
@@ -1365,116 +1396,117 @@ bool _isScrollIdle() => true;
                   ),
                 ),
               ),
-            AnimatedSlide(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOutCubic,
-              offset: _showControls ? Offset.zero : const Offset(0, 1),
-              child: AnimatedOpacity(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
-                opacity: _showControls ? 1 : 0,
-                child: !_showControls
-                    ? const SizedBox.shrink()
-                    : Align(
-                        alignment: Alignment.bottomCenter,
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            // Give the catalog drawer room to breathe — Fanqie's
-                            // TOC sheet is roughly half-screen, not a 280px strip.
-                            maxHeight: MediaQuery.sizeOf(context).height * .72,
-                          ),
-                          child: SafeArea(
-                            top: false,
-                            child: ReaderBottomControls(
-                              fontSize: _fontSize,
-                              readerFontWeight: _readerFontWeight,
-                              lineSpacing: _lineSpacing,
-                              background: _backgroundFor(context),
-                              readingMode: _readingMode,
-                              progress: _progress,
-                              canSeek: _canSeekProgress,
-                              currentParagraph: _activeParagraph,
-                              chapters: _chapterEntries(),
-                              chapterPageLabels: _chapterPageLabels(),
-                              bookmarks: [
-                                for (final bookmark in _bookmarks)
-                                  MapEntry(
-                                    bookmark,
-                                    bookmarkSummary(widget.book.paragraphs, bookmark),
-                                  ),
-                              ],
-                              notes: _notes,
-                              onProgress: _jumpToProgress,
-                              onJumpToParagraph: (paragraph) {
-                                setState(() => _showControls = false);
-                                _jumpToParagraph(paragraph);
-                              },
-                              onRemoveBookmark: _removeBookmark,
-                              onRemoveNote: _removeNote,
-                              onToggleUiTheme: widget.onToggleUiTheme,
-                              onShowFonts: _showFontPicker,
-                            onFontSize: (value) {
-                              setState(() {
-                                _fontSize = value;
-                              });
-                              _scheduleSave();
-                            },
-                            onReaderFontWeight: (value) {
-                              setState(() => _readerFontWeight = value);
-                              _saveTimer?.cancel();
-                              _saveState();
-                            },
-                            onLineSpacing: (value) {
-                              setState(() => _lineSpacing = value);
-                              _saveTimer?.cancel();
-                              _saveState();
-                            },
-                            onBackground: (value) {
-                              setState(() => _background = value);
-                              _scheduleSave();
-                            },
-                            onReadingMode: (value) {
-                              _setReadingMode(value);
-                            },
-                            pageTurnStyle: _pageTurnStyle,
-                            onPageTurnStyle: (value) {
-                              setState(() => _pageTurnStyle = value);
-                              _saveTimer?.cancel();
-                              _saveState();
-                            },
-                            brightness: _brightness,
-                            eyeCare: _eyeCare,
-                            keepScreenOn: _keepScreenOn,
-                            volumeKeys: _volumeKeys,
-                            onBrightness: (value) {
-                              setState(() => _brightness = value);
-                              _platform.setBrightness(value);
-                              _scheduleSave();
-                            },
-                            onEyeCare: (value) {
-                              setState(() => _eyeCare = value);
-                              _saveTimer?.cancel();
-                              _saveState();
-                            },
-                            onKeepScreenOn: (value) {
-                              setState(() => _keepScreenOn = value);
-                              _platform.setKeepScreenOn(value);
-                              _saveTimer?.cancel();
-                              _saveState();
-                            },
-                            onVolumeKeys: (value) {
-                              setState(() => _volumeKeys = value);
-                              _syncVolumeKeys();
-                              _saveTimer?.cancel();
-                              _saveState();
-                            },
-                          ),
-                          ),
-                        ),
-                      ),
-              ),
+            // Fanqie ReaderMenu: Stack overlay (not Dialog), top bar -44dp /
+            // bottom bar height, both 300ms. Font picker stays wired via
+            // onShowFonts → existing FontPickerSheet.
+            ReaderMenu(
+              visible: _showControls,
+              bookTitle: widget.book.title,
+              bookmarked: _isCurrentViewBookmarked,
+              // Fanqie TopBar exit: leave the reader route. Progress is
+              // flushed in dispose()/didChangeAppLifecycle.
+              onBack: () {
+                final navigator = Navigator.of(context);
+                if (navigator.canPop()) {
+                  navigator.pop();
+                } else {
+                  setState(() => _showControls = false);
+                }
+              },
+              // Tap outside only collapses chrome — not an exit.
+              onDismiss: () => setState(() => _showControls = false),
+              onToggleBookmark: _toggleBookmarkAtCurrentPosition,
+              progress: _progress,
+              chapterCount: _chapters.length,
+              currentChapterIndex: _chapterIndexFor(_activeParagraph) < 0
+                  ? 0
+                  : _chapterIndexFor(_activeParagraph),
+              chapterTitle: _chapterLabel,
+              canSeek: _canSeekProgress,
+              onSeekProgress: _jumpToProgress,
+              onSeekChapter: _jumpToChapter,
+              fontSize: _fontSize,
+              readerFontWeight: _readerFontWeight,
+              lineSpacing: _lineSpacing,
+              background: _backgroundFor(context),
+              readingMode: _readingMode,
+              pageTurnStyle: _pageTurnStyle,
+              brightness: _brightness,
+              eyeCare: _eyeCare,
+              keepScreenOn: _keepScreenOn,
+              volumeKeys: _volumeKeys,
+              chapters: _chapterEntries(),
+              chapterPageLabels: _chapterPageLabels(),
+              bookmarks: [
+                for (final bookmark in _bookmarks)
+                  MapEntry(
+                    bookmark,
+                    bookmarkSummary(widget.book.paragraphs, bookmark),
+                  ),
+              ],
+              notes: _notes,
+              currentParagraph: _activeParagraph,
+              onJumpToParagraph: (paragraph) {
+                setState(() => _showControls = false);
+                _jumpToParagraph(paragraph);
+              },
+              onRemoveBookmark: _removeBookmark,
+              onRemoveNote: _removeNote,
+              onFontSize: (value) {
+                setState(() {
+                  _fontSize = value;
+                });
+                _scheduleSave();
+              },
+              onReaderFontWeight: (value) {
+                setState(() => _readerFontWeight = value);
+                _saveTimer?.cancel();
+                _saveState();
+              },
+              onLineSpacing: (value) {
+                setState(() => _lineSpacing = value);
+                _saveTimer?.cancel();
+                _saveState();
+              },
+              onBackground: (value) {
+                setState(() => _background = value);
+                _scheduleSave();
+              },
+              onReadingMode: (value) {
+                _setReadingMode(value);
+              },
+              onPageTurnStyle: (value) {
+                setState(() => _pageTurnStyle = value);
+                _saveTimer?.cancel();
+                _saveState();
+              },
+              onBrightness: (value) {
+                setState(() => _brightness = value);
+                _platform.setBrightness(value);
+                _scheduleSave();
+              },
+              onEyeCare: (value) {
+                setState(() => _eyeCare = value);
+                _saveTimer?.cancel();
+                _saveState();
+              },
+              onKeepScreenOn: (value) {
+                setState(() => _keepScreenOn = value);
+                _platform.setKeepScreenOn(value);
+                _saveTimer?.cancel();
+                _saveState();
+              },
+              onVolumeKeys: (value) {
+                setState(() => _volumeKeys = value);
+                _syncVolumeKeys();
+                _saveTimer?.cancel();
+                _saveState();
+              },
+              onShowFonts: _showFontPicker,
+              onToggleUiTheme: widget.onToggleUiTheme,
             ),
           ],
+        ),
         ),
       ),
     );
@@ -1657,6 +1689,11 @@ bool _isScrollIdle() => true;
   void _startCoverTurn(int from, int to) {
     _coverFromPage = from;
     _coverToPage = to;
+    // Measure the destination page before the animation starts so the
+    // overlay never shows a half-paginated page that reflows mid-turn.
+    if (!_pager.fullyPaginated && to >= _pager.pageCount) {
+      _pager.paginateUntilPages(to + 1);
+    }
     // Keep PageView on [from] during the overlay so the underlying page does
     // not re-layout mid-animation (avoids visible “reflow” under the cover).
     setState(() {
@@ -1703,11 +1740,13 @@ bool _isScrollIdle() => true;
     final to = _coverToPage;
     if (from == null || to == null) return const SizedBox.shrink();
     final isNext = to > from;
-    final movingPage = isNext ? from : to;
-    final staticPage = isNext ? to : from;
+    // Fanqie「覆盖」: the incoming page slides *over* the stationary current
+    // page (not the old page sliding away). Old page stays put underneath.
+    final movingPage = to;
+    final staticPage = from;
     // Page surfaces are built once (as AnimatedBuilder.child) and only the
     // slide offset updates each frame. RepaintBoundary lets Flutter rasterize
-    // the expensive Selectable-free text layers once, then just move them.
+    // the expensive text layers once, then just move them.
     return Positioned.fill(
       child: IgnorePointer(
         child: RepaintBoundary(
@@ -1719,16 +1758,29 @@ bool _isScrollIdle() => true;
                 AnimatedBuilder(
                   animation: _coverAnim,
                   child: RepaintBoundary(
-                    child: _coverPageSurface(context, movingPage),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        boxShadow: [
+                          BoxShadow(
+                            color: CupertinoColors.black.withValues(alpha: .22),
+                            blurRadius: 18,
+                            spreadRadius: 1,
+                            offset: Offset(isNext ? -10 : 10, 0),
+                          ),
+                        ],
+                      ),
+                      child: _coverPageSurface(context, movingPage),
+                    ),
                   ),
                   builder: (context, child) {
                     // easeOutCubic: fast start, gentle settle — matches the
-                    // "flick and it goes" feel of Fanqie's custom Scroller
-                    // (low friction, long fling) better than ease-in-out.
+                    // "flick and it goes" feel of Fanqie's custom Scroller.
                     final progress = Curves.easeOutCubic.transform(
                       _coverAnim.value,
                     );
-                    final dx = isNext ? -progress : -1 + progress;
+                    // Next: incoming page starts off-screen right (dx=1→0).
+                    // Prev: incoming page starts off-screen left (dx=-1→0).
+                    final dx = isNext ? 1 - progress : -1 + progress;
                     return FractionalTranslation(
                       translation: Offset(dx, 0),
                       child: child,
@@ -1749,7 +1801,12 @@ bool _isScrollIdle() => true;
       color: _backgroundFor(context),
       child: Padding(
         padding: EdgeInsets.fromLTRB(28, 20, 28, _readerBottomInset),
-        child: _readingPage(context, page, selectable: false),
+        // selectable:true matches the PageView builder exactly. Rendering the
+        // overlay with selectable:false used SelectableText vs Text and let
+        // the two widgets lay out differently — the page visibly "settled"
+        // (paragraph spacing shifted) the moment the animation ended.
+        // The overlay is already wrapped in IgnorePointer.
+        child: _readingPage(context, page, selectable: true),
       ),
     );
   }
