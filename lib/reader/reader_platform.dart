@@ -25,7 +25,9 @@ class ReaderPlatform {
 
   Future<void> setKeepScreenOn(bool enabled) async {
     try {
-      await _channel.invokeMethod<void>('setKeepScreenOn', {'enabled': enabled});
+      await _channel.invokeMethod<void>('setKeepScreenOn', {
+        'enabled': enabled,
+      });
     } on PlatformException {
       // Ignored.
     } on MissingPluginException {

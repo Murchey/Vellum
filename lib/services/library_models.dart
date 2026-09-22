@@ -1,3 +1,28 @@
+/// One-time alignment ratio for stored font sizes.
+///
+/// The reference reader (番茄小说) lays out its body text at **24dp** by
+/// default (`com.dragon.reader.lib.resource.a` → `ot5.j.d(24)`, both dp→px),
+/// while Vellum's original default was 19 logical px — the same slider number
+/// therefore looked noticeably smaller. Preferences saved before that
+/// alignment are scaled once by `24/19` on load, flagged, and then left alone.
+const kReaderLegacyFontScale = 24 / 19;
+
+/// Body text sizes are rendered in this range, in logical pixels.
+const kReaderFontMin = 16.0;
+const kReaderFontMax = 42.0;
+const kReaderFontDefault = 24.0;
+
+/// Scales sizes saved before the reference-reader alignment exactly once.
+///
+/// Idempotent: already-aligned preferences come back untouched, so callers may
+/// apply this on every load.
+ReaderPreferences alignedReaderPreferences(ReaderPreferences prefs) {
+  if (prefs.fontScaleAligned) return prefs;
+  final scaled = (prefs.fontSize * kReaderLegacyFontScale)
+      .roundToDouble()
+      .clamp(kReaderFontMin, kReaderFontMax);
+  return prefs.copyWith(fontSize: scaled, fontScaleAligned: true);
+}
 
 class FontPreferences {
   const FontPreferences({
@@ -14,10 +39,10 @@ class FontPreferences {
 /// Global reader display preferences — shared across all books.
 class ReaderPreferences {
   const ReaderPreferences({
-    this.fontSize = 19,
+    this.fontSize = kReaderFontDefault,
     this.readerFontFamily = 'Georgia',
     this.readerFontWeight = 'regular',
-    this.lineSpacing = 'comfortable',
+    this.lineSpacing = 'standard',
     this.backgroundValue,
     this.mode = 'scroll',
     this.pageTurn = 'cover',
@@ -25,6 +50,7 @@ class ReaderPreferences {
     this.eyeCare = 'off',
     this.keepScreenOn = true,
     this.volumeKeys = false,
+    this.fontScaleAligned = true,
   });
 
   final double fontSize;
@@ -47,6 +73,27 @@ class ReaderPreferences {
   /// Volume buttons turn pages while the reader is open.
   final bool volumeKeys;
 
+  /// Whether the stored size has already been scaled by
+  /// [kReaderLegacyFontScale]. Files written before that alignment carry no
+  /// key and therefore read as `false`.
+  final bool fontScaleAligned;
+
+  ReaderPreferences copyWith({double? fontSize, bool? fontScaleAligned}) =>
+      ReaderPreferences(
+        fontSize: fontSize ?? this.fontSize,
+        readerFontFamily: readerFontFamily,
+        readerFontWeight: readerFontWeight,
+        lineSpacing: lineSpacing,
+        backgroundValue: backgroundValue,
+        mode: mode,
+        pageTurn: pageTurn,
+        brightness: brightness,
+        eyeCare: eyeCare,
+        keepScreenOn: keepScreenOn,
+        volumeKeys: volumeKeys,
+        fontScaleAligned: fontScaleAligned ?? this.fontScaleAligned,
+      );
+
   Map<String, dynamic> toJson() => {
     'fontSize': fontSize,
     'readerFontFamily': readerFontFamily,
@@ -59,14 +106,15 @@ class ReaderPreferences {
     'eyeCare': eyeCare,
     'keepScreenOn': keepScreenOn,
     'volumeKeys': volumeKeys,
+    'fontScaleAligned': fontScaleAligned,
   };
 
   factory ReaderPreferences.fromJson(Map<String, dynamic> json) =>
       ReaderPreferences(
-        fontSize: (json['fontSize'] as num?)?.toDouble() ?? 19,
+        fontSize: (json['fontSize'] as num?)?.toDouble() ?? kReaderFontDefault,
         readerFontFamily: json['readerFontFamily'] as String? ?? 'Georgia',
         readerFontWeight: json['readerFontWeight'] as String? ?? 'regular',
-        lineSpacing: json['lineSpacing'] as String? ?? 'comfortable',
+        lineSpacing: json['lineSpacing'] as String? ?? 'standard',
         backgroundValue: (json['backgroundValue'] as num?)?.toInt(),
         mode: json['mode'] as String? ?? 'scroll',
         pageTurn: json['pageTurn'] as String? ?? 'cover',
@@ -74,6 +122,7 @@ class ReaderPreferences {
         eyeCare: json['eyeCare'] as String? ?? 'off',
         keepScreenOn: json['keepScreenOn'] as bool? ?? true,
         volumeKeys: json['volumeKeys'] as bool? ?? false,
+        fontScaleAligned: json['fontScaleAligned'] as bool? ?? false,
       );
 }
 
@@ -97,10 +146,10 @@ class InstalledFont {
 
 class ReadingState {
   const ReadingState({
-    this.fontSize = 19,
+    this.fontSize = kReaderFontDefault,
     this.readerFontFamily = 'Georgia',
     this.readerFontWeight = 'regular',
-    this.lineSpacing = 'comfortable',
+    this.lineSpacing = 'standard',
     this.backgroundValue,
     this.mode = 'scroll',
     this.position = 0,
@@ -177,10 +226,10 @@ class ReadingState {
   };
 
   factory ReadingState.fromJson(Map<String, dynamic> json) => ReadingState(
-    fontSize: (json['fontSize'] as num?)?.toDouble() ?? 19,
+    fontSize: (json['fontSize'] as num?)?.toDouble() ?? kReaderFontDefault,
     readerFontFamily: json['readerFontFamily'] as String? ?? 'Georgia',
     readerFontWeight: json['readerFontWeight'] as String? ?? 'regular',
-    lineSpacing: json['lineSpacing'] as String? ?? 'comfortable',
+    lineSpacing: json['lineSpacing'] as String? ?? 'standard',
     backgroundValue: (json['backgroundValue'] as num?)?.toInt(),
     mode: json['mode'] as String? ?? 'scroll',
     position: (json['position'] as num?)?.toDouble() ?? 0,
@@ -212,7 +261,6 @@ class StorageUsage {
 
   int get totalBytes => libraryBytes + readingStateBytes + fontBytes;
 }
-
 
 class LibraryFolder {
   const LibraryFolder({required this.id, required this.name});

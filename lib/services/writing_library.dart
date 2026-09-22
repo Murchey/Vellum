@@ -178,8 +178,6 @@ class WritingLibrary {
 
   Future<File> _file() async {
     final dir = await getApplicationDocumentsDirectory();
-    return File(
-      '${dir.path}${Platform.pathSeparator}vellum_writings.json',
-    );
+    return File('${dir.path}${Platform.pathSeparator}vellum_writings.json');
   }
 }

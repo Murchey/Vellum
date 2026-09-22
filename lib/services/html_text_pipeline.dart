@@ -43,20 +43,41 @@ class HtmlTextPipeline {
   static final _styleUnderline = RegExp(r'text-decoration[^;]*underline');
   static final _headingTag = RegExp(r'^h[1-6]$');
 
-  static final _openBoldTag = RegExp(r'<(b|strong)\b[^>]*>', caseSensitive: false);
-  static final _closeBoldTag = RegExp(r'</(b|strong)\s*>', caseSensitive: false);
-  static final _openItalicTag = RegExp(r'<(i|em|cite|var)\b[^>]*>', caseSensitive: false);
-  static final _closeItalicTag = RegExp(r'</(i|em|cite|var)\s*>', caseSensitive: false);
+  static final _openBoldTag = RegExp(
+    r'<(b|strong)\b[^>]*>',
+    caseSensitive: false,
+  );
+  static final _closeBoldTag = RegExp(
+    r'</(b|strong)\s*>',
+    caseSensitive: false,
+  );
+  static final _openItalicTag = RegExp(
+    r'<(i|em|cite|var)\b[^>]*>',
+    caseSensitive: false,
+  );
+  static final _closeItalicTag = RegExp(
+    r'</(i|em|cite|var)\s*>',
+    caseSensitive: false,
+  );
   static final _openUnderlineTag = RegExp(r'<u\b[^>]*>', caseSensitive: false);
   static final _closeUnderlineTag = RegExp(r'</u\s*>', caseSensitive: false);
-  static final _openHeadingTag = RegExp(r'<h([1-6])\b[^>]*>', caseSensitive: false);
-  static final _openQuoteTag = RegExp(r'<blockquote\b[^>]*>', caseSensitive: false);
+  static final _openHeadingTag = RegExp(
+    r'<h([1-6])\b[^>]*>',
+    caseSensitive: false,
+  );
+  static final _openQuoteTag = RegExp(
+    r'<blockquote\b[^>]*>',
+    caseSensitive: false,
+  );
   static final _openListItemTag = RegExp(r'<li\b[^>]*>', caseSensitive: false);
   static final _breakTag = RegExp(
     r'<(br|/p|/h[1-6]|/div|/section|/article|/pre|/table|/li|/blockquote|hr|/center)\b[^>]*>',
     caseSensitive: false,
   );
-  static final _openCenterTag = RegExp(r'<center\b[^>]*>', caseSensitive: false);
+  static final _openCenterTag = RegExp(
+    r'<center\b[^>]*>',
+    caseSensitive: false,
+  );
   static final _anyTag = RegExp(r'<[^>]*>');
 
   /// A tag that never reaches its `>` — `<font color="red"` in either position,
@@ -425,9 +446,7 @@ class HtmlTextPipeline {
   /// UTF-8 with `allowMalformed: false` throws and the import fails outright.
   String decodePlainText(Uint8List bytes) {
     if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {
-      return _sanitizePlainText(
-        _decodeUtf16(bytes.sublist(2), Endian.little),
-      );
+      return _sanitizePlainText(_decodeUtf16(bytes.sublist(2), Endian.little));
     }
     if (bytes.length >= 2 && bytes[0] == 0xfe && bytes[1] == 0xff) {
       return _sanitizePlainText(_decodeUtf16(bytes.sublist(2), Endian.big));
@@ -492,9 +511,8 @@ class HtmlTextPipeline {
 
   /// Strips BOM residue and ideographic spaces that break chapter matching and
   /// paragraph splitting (Fanqie's `pt5.h.e` does the same).
-  String _sanitizePlainText(String text) => text
-      .replaceAll('﻿', '')
-      .replaceAll('　', ' ');
+  String _sanitizePlainText(String text) =>
+      text.replaceAll('﻿', '').replaceAll('　', ' ');
 
   /// Detects chapter headings in decoded plain paragraphs (TXT import path).
   ///
@@ -530,9 +548,7 @@ class HtmlTextPipeline {
         : syntheticChapterParagraphs;
     for (var index = 0; index < paragraphs.length; index += stride) {
       final chapterNo = index ~/ stride + 1;
-      synthetic.add(
-        BookTocEntry(title: '第$chapterNo章', paragraphIndex: index),
-      );
+      synthetic.add(BookTocEntry(title: '第$chapterNo章', paragraphIndex: index));
     }
     return synthetic;
   }
@@ -595,10 +611,7 @@ class HtmlTextPipeline {
           _boldItalicStar,
           (match) => '[[b]][[i]]${match.group(1)!}[[/i]][[/b]]',
         )
-        .replaceAllMapped(
-          _boldStar,
-          (match) => '[[b]]${match.group(1)!}[[/b]]',
-        )
+        .replaceAllMapped(_boldStar, (match) => '[[b]]${match.group(1)!}[[/b]]')
         .replaceAllMapped(
           _italicStar,
           (match) => '[[i]]${match.group(1)!}[[/i]]',
@@ -640,9 +653,7 @@ class HtmlTextPipeline {
       // unterminated tag *together with the text after it*, which is exactly
       // the label we want to keep. Complete tags go first, then the runs that
       // never reach their `>`.
-      value = value
-          .replaceAll(_anyTag, ' ')
-          .replaceAll(_danglingTag, ' ');
+      value = value.replaceAll(_anyTag, ' ').replaceAll(_danglingTag, ' ');
     }
     if (value.contains('[[')) value = value.replaceAll(_readerMarker, ' ');
     return value.replaceAll(_whitespaceRun, ' ').trim();

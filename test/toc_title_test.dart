@@ -20,32 +20,32 @@ Uint8List _dirtyNcxEpub() {
       ArchiveFile.string(
         'OPS/book.opf',
         '<package>'
-        '<metadata><dc:title>脏目录</dc:title></metadata>'
-        '<manifest>'
-        '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
-        '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
-        '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>'
-        '<item id="c3" href="c3.xhtml" media-type="application/xhtml+xml"/>'
-        '</manifest>'
-        '<spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/>'
-        '<itemref idref="c3"/></spine>'
-        '</package>',
+            '<metadata><dc:title>脏目录</dc:title></metadata>'
+            '<manifest>'
+            '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+            '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>'
+            '<item id="c3" href="c3.xhtml" media-type="application/xhtml+xml"/>'
+            '</manifest>'
+            '<spine toc="ncx"><itemref idref="c1"/><itemref idref="c2"/>'
+            '<itemref idref="c3"/></spine>'
+            '</package>',
       ),
     )
     ..addFile(
       ArchiveFile.string(
         'OPS/toc.ncx',
         '<ncx><navMap>'
-        // Markup that was escaped twice by the generator.
-        '<navPoint><navLabel><text>&lt;b&gt;第一章&lt;/b&gt;</text></navLabel>'
-        '<content src="c1.xhtml#s1"/></navPoint>'
-        // A tag the source never closed.
-        '<navPoint><navLabel><text>第二章 <font color="red"</text></navLabel>'
-        '<content src="c2.xhtml#s2"/></navPoint>'
-        // Nested tags that do close.
-        '<navPoint><navLabel><text><span class="n">第三章</span></text></navLabel>'
-        '<content src="c3.xhtml#s3"/></navPoint>'
-        '</navMap></ncx>',
+            // Markup that was escaped twice by the generator.
+            '<navPoint><navLabel><text>&lt;b&gt;第一章&lt;/b&gt;</text></navLabel>'
+            '<content src="c1.xhtml#s1"/></navPoint>'
+            // A tag the source never closed.
+            '<navPoint><navLabel><text>第二章 <font color="red"</text></navLabel>'
+            '<content src="c2.xhtml#s2"/></navPoint>'
+            // Nested tags that do close.
+            '<navPoint><navLabel><text><span class="n">第三章</span></text></navLabel>'
+            '<content src="c3.xhtml#s3"/></navPoint>'
+            '</navMap></ncx>',
       ),
     )
     ..addFile(
@@ -129,26 +129,31 @@ void main() {
 
       const pipeline = HtmlTextPipeline();
       final paragraphs = pipeline.splitParagraphs(pipeline.htmlToText(source));
-      final entries = const MobiDecoder().mobiTocEntries(source, paragraphs, 1252);
+      final entries = const MobiDecoder().mobiTocEntries(
+        source,
+        paragraphs,
+        1252,
+      );
 
       expect(entries.map((entry) => entry.title).toList(), ['第一章', '第二章']);
-      expect(
-        entries.map((entry) => entry.paragraphIndex).toList(),
-        [1, 3],
-      );
+      expect(entries.map((entry) => entry.paragraphIndex).toList(), [1, 3]);
     });
   });
 
   group('epub labels', () {
     test('cleans NCX labels end to end', () {
       const importer = BookImporter();
-      final book = importer.decode(filename: 'dirty.epub', bytes: _dirtyNcxEpub());
+      final book = importer.decode(
+        filename: 'dirty.epub',
+        bytes: _dirtyNcxEpub(),
+      );
 
       expect(book.tocEntries, hasLength(3));
-      expect(
-        book.tocEntries.map((entry) => entry.title).toList(),
-        ['第一章', '第二章', '第三章'],
-      );
+      expect(book.tocEntries.map((entry) => entry.title).toList(), [
+        '第一章',
+        '第二章',
+        '第三章',
+      ]);
     });
 
     test('chapterEntries repairs labels stored by older imports', () {
@@ -158,10 +163,7 @@ void main() {
         paragraphs: ['第一章', '正文', '第二章'],
         tocEntries: [
           BookTocEntry(title: '&lt;b&gt;第一章&lt;/b&gt;', paragraphIndex: 0),
-          BookTocEntry(
-            title: '<font color="red"第二章',
-            paragraphIndex: 2,
-          ),
+          BookTocEntry(title: '<font color="red"第二章', paragraphIndex: 2),
         ],
       );
 
@@ -175,10 +177,11 @@ void main() {
         '[[vellum-heading:1]]第二章 晴',
         '第二章 <font color="red"',
       ]);
-      expect(
-        chapters.map((entry) => entry.value).toList(),
-        ['第一章 夜雨', '第二章 晴', '第二章'],
-      );
+      expect(chapters.map((entry) => entry.value).toList(), [
+        '第一章 夜雨',
+        '第二章 晴',
+        '第二章',
+      ]);
       expect(chapters.map((entry) => entry.key).toList(), [0, 1, 2]);
     });
   });

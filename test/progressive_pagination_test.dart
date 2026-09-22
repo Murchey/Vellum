@@ -8,7 +8,7 @@ import 'package:vellum/services/book_importer.dart';
 void main() {
   PageLayoutConfig config() => const PageLayoutConfig(
     fontSize: 18,
-    lineSpacing: ReaderLineSpacing.comfortable,
+    lineSpacing: ReaderLineSpacing.standard,
     fontFamily: 'Georgia',
     fontWeight: ReaderFontWeight.regular,
     availableHeight: 520,

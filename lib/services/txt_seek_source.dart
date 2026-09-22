@@ -55,10 +55,7 @@ class TxtSeekSource {
     raf.setPositionSync(chapter.startOffset);
     final raw = raf.readSync(chapter.byteLength);
     if (raw.isEmpty) return '';
-    return decodeTxtWithEncoding(
-      Uint8List.fromList(raw),
-      catalog.encoding,
-    );
+    return decodeTxtWithEncoding(Uint8List.fromList(raw), catalog.encoding);
   }
 
   void _store(int chapterIndex, List<String> paragraphs) {
@@ -121,7 +118,9 @@ class TxtParagraphList extends ListBase<String> {
     final paragraphs = source.chapterParagraphs(chapter.index);
     if (local < 0 || local >= paragraphs.length) {
       // Catalog drift (file edited after import): degrade gracefully.
-      return paragraphs.isEmpty ? '' : paragraphs[local.clamp(0, paragraphs.length - 1)];
+      return paragraphs.isEmpty
+          ? ''
+          : paragraphs[local.clamp(0, paragraphs.length - 1)];
     }
     return paragraphs[local];
   }

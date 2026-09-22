@@ -1,12 +1,9 @@
-
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
-
-
 
 import '../services/book_library.dart';
 
@@ -16,18 +13,16 @@ import '../services/vellum_update_service.dart';
 
 import '../theme/vellum_theme.dart';
 
-
 import 'font_manager_sheet.dart';
 
 import 'ebook_to_txt_page.dart';
 import 'reading_stats_page.dart';
 import 'update_sheet.dart';
 
-
-
 class SettingsPage extends StatefulWidget {
+  final VoidCallback onCycleTheme;
 
-  final VoidCallback onToggleTheme;
+  final String themeModeLabel;
 
   final bool isDark;
 
@@ -46,13 +41,10 @@ class SettingsPage extends StatefulWidget {
   final Future<void> Function(String) onDeleteFont;
 
   final Future<void> Function({
-
     required bool useForUi,
 
     required bool useForContent,
-
   })
-
   onFontUsageChanged;
 
   final Future<StorageUsage> Function() storageUsage;
@@ -62,8 +54,8 @@ class SettingsPage extends StatefulWidget {
   final Future<void> Function() onClearReadingStates;
 
   const SettingsPage({
-
-    required this.onToggleTheme,
+    required this.onCycleTheme,
+    required this.themeModeLabel,
 
     required this.isDark,
 
@@ -90,18 +82,11 @@ class SettingsPage extends StatefulWidget {
     required this.onClearReadingStates,
 
     super.key,
-
   });
 
-
-
   @override
-
   State<SettingsPage> createState() => _SettingsPageState();
-
 }
-
-
 
 class _SettingsPageState extends State<SettingsPage> {
   late Future<StorageUsage> _usage;
@@ -147,9 +132,9 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       final bytes = Uint8List.fromList(
         utf8.encode(
-          const JsonEncoder.withIndent('  ').convert([
-            for (final n in notes) n.toJson(),
-          ]),
+          const JsonEncoder.withIndent(
+            '  ',
+          ).convert([for (final n in notes) n.toJson()]),
         ),
       );
       final suggested =
@@ -203,7 +188,9 @@ class _SettingsPageState extends State<SettingsPage> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('支持 owner/repo、gitee.com/owner/repo 或 github.com/owner/repo；留空则使用默认仓库。'),
+            const Text(
+              '支持 owner/repo、gitee.com/owner/repo 或 github.com/owner/repo；留空则使用默认仓库。',
+            ),
             const SizedBox(height: 12),
             CupertinoTextField(
               controller: controller,
@@ -244,8 +231,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _refresh() => setState(() => _usage = widget.storageUsage());
 
-
-
   Future<void> _checkForUpdate() async {
     setState(() => _checkingUpdate = true);
     try {
@@ -255,469 +240,355 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-
-
   Future<void> _showUpdateDialog(String message) => showCupertinoDialog<void>(
-
     context: context,
 
     builder: (context) => CupertinoAlertDialog(
-
       title: const Text('检查更新'),
 
       content: Text(message),
 
       actions: [
-
         CupertinoDialogAction(
-
           onPressed: () => Navigator.pop(context),
 
           child: const Text('好'),
-
         ),
-
       ],
-
     ),
-
   );
 
-
-
   String _formatBytes(int bytes) {
-
     if (bytes < 1024) return '$bytes B';
 
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
 
     return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-
   }
 
-
-
   Future<void> _confirm(
-
     String title,
 
     String message,
 
     Future<void> Function() action,
-
   ) async {
-
     final confirmed = await showCupertinoDialog<bool>(
-
       context: context,
 
       builder: (context) => CupertinoAlertDialog(
-
         title: Text(title),
 
         content: Text(message),
 
         actions: [
-
           CupertinoDialogAction(
-
             onPressed: () => Navigator.pop(context, false),
 
             child: const Text('取消'),
-
           ),
 
           CupertinoDialogAction(
-
             isDestructiveAction: true,
 
             onPressed: () => Navigator.pop(context, true),
 
             child: const Text('清理'),
-
           ),
-
         ],
-
       ),
-
     );
 
     if (confirmed == true) {
-
       await action();
 
       if (mounted) _refresh();
-
     }
-
   }
 
-
-
   @override
-
   Widget build(BuildContext context) {
-
     final pageBackground = CupertinoTheme.of(context).scaffoldBackgroundColor;
 
     final pressedBackground = VellumTheme.cardOf(context);
 
     final hasActiveFont = widget.activeFontName.isNotEmpty;
 
-
-
     return CupertinoPageScaffold(
-
       backgroundColor: pageBackground,
 
-      navigationBar: const CupertinoNavigationBar(middle: Text('设置')),
+      navigationBar: CupertinoNavigationBar(
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
+        middle: const Text('设置'),
+      ),
 
       child: MediaQuery.withClampedTextScaling(
-
         minScaleFactor: 1,
 
         maxScaleFactor: 1.2,
 
         child: SafeArea(
+          child: ListView(
+            children: [
+              CupertinoListSection.insetGrouped(
+                backgroundColor: pageBackground,
 
-        child: ListView(
+                header: const Text('外观'),
 
-          children: [
+                children: [
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
 
-            CupertinoListSection.insetGrouped(
+                    backgroundColorActivated: pressedBackground,
 
-              backgroundColor: pageBackground,
+                    leading: Icon(
+                      widget.isDark
+                          ? CupertinoIcons.sun_max
+                          : CupertinoIcons.moon,
+                    ),
 
-              header: const Text('外观'),
+                    title: const Text('界面主题'),
 
-              children: [
+                    additionalInfo: Text(widget.themeModeLabel),
 
-                CupertinoListTile(
-
-                  backgroundColor: pageBackground,
-
-                  backgroundColorActivated: pressedBackground,
-
-                  leading: Icon(
-
-                    widget.isDark
-
-                        ? CupertinoIcons.sun_max
-
-                        : CupertinoIcons.moon,
-
+                    onTap: widget.onCycleTheme,
                   ),
+                ],
+              ),
 
-                  title: const Text('界面主题'),
+              CupertinoListSection.insetGrouped(
+                backgroundColor: pageBackground,
 
-                  additionalInfo: Text(widget.isDark ? '深色' : '浅色'),
+                header: const Text('字体管理'),
 
-                  onTap: widget.onToggleTheme,
+                children: [
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
 
-                ),
+                    backgroundColorActivated: pressedBackground,
 
-              ],
+                    leading: const Icon(CupertinoIcons.plus_circle),
 
-            ),
+                    title: const Text('导入字体'),
 
-            CupertinoListSection.insetGrouped(
+                    additionalInfo: Text('${widget.installedFonts.length}'),
 
-              backgroundColor: pageBackground,
-
-              header: const Text('字体管理'),
-
-              children: [
-
-                CupertinoListTile(
-
-                  backgroundColor: pageBackground,
-
-                  backgroundColorActivated: pressedBackground,
-
-                  leading: const Icon(CupertinoIcons.plus_circle),
-
-                  title: const Text('导入字体'),
-
-                  additionalInfo: Text(
-                    '${widget.installedFonts.length}',
+                    onTap: widget.onImportFonts,
                   ),
-
-                  onTap: widget.onImportFonts,
-
-                ),
-
-                CupertinoListTile(
-
-                  backgroundColor: pageBackground,
-
-                  backgroundColorActivated: pressedBackground,
-
-                  leading: const Icon(CupertinoIcons.textformat),
-
-                  title: const Text('字体列表'),
-
-                  onTap: () => _showFontManager(context),
-
-                ),
-
-                if (hasActiveFont) ...[
 
                   CupertinoListTile(
-
                     backgroundColor: pageBackground,
 
                     backgroundColorActivated: pressedBackground,
 
-                    title: const Text('用于界面字体'),
+                    leading: const Icon(CupertinoIcons.textformat),
 
-                    trailing: CupertinoSwitch(
+                    title: const Text('字体列表'),
 
-                      value: widget.useFontForUi,
-
-                      onChanged: (value) => widget.onFontUsageChanged(
-
-                        useForUi: value,
-
-                        useForContent: widget.useFontForContent,
-
-                      ),
-
-                    ),
-
+                    onTap: () => _showFontManager(context),
                   ),
 
+                  if (hasActiveFont) ...[
+                    CupertinoListTile(
+                      backgroundColor: pageBackground,
+
+                      backgroundColorActivated: pressedBackground,
+
+                      title: const Text('用于界面字体'),
+
+                      trailing: CupertinoSwitch(
+                        value: widget.useFontForUi,
+
+                        onChanged: (value) => widget.onFontUsageChanged(
+                          useForUi: value,
+
+                          useForContent: widget.useFontForContent,
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
+              ),
 
-              ],
+              CupertinoListSection.insetGrouped(
+                backgroundColor: pageBackground,
 
-            ),
+                header: const Text('工具'),
 
-            CupertinoListSection.insetGrouped(
-
-              backgroundColor: pageBackground,
-
-              header: const Text('工具'),
-
-              children: [
-
-                CupertinoListTile(
-
-                  backgroundColor: pageBackground,
-
-                  backgroundColorActivated: pressedBackground,
-
-                  leading: const Icon(CupertinoIcons.doc_text),
-
-                  title: const Text('MOBI / EPUB 转 TXT'),
-
-                  additionalInfo: const Text('独立页面'),
-
-                  onTap: () => Navigator.of(context).push(
-
-                    CupertinoPageRoute(
-
-                      builder: (_) => const EbookToTxtPage(),
-
-                    ),
-
-                  ),
-
-                ),
-
-              ],
-
-            ),
-
-            CupertinoListSection.insetGrouped(
-              backgroundColor: pageBackground,
-              header: const Text('阅读数据'),
-              children: [
-                CupertinoListTile(
-                  backgroundColor: pageBackground,
-                  backgroundColorActivated: pressedBackground,
-                  leading: const Icon(CupertinoIcons.chart_bar),
-                  title: const Text('阅读统计'),
-                  additionalInfo: Text(
-                    '今日 ${ReadingStatsService.formatDuration(_readingStats.todaySeconds)}'
-                    ' · 累计 ${ReadingStatsService.formatDuration(_readingStats.totalSeconds)}',
-                  ),
-                  onTap: () async {
-                    await Navigator.of(context).push(
-                      CupertinoPageRoute(
-                        builder: (_) => const ReadingStatsPage(),
-                      ),
-                    );
-                    await _loadReadingStats();
-                  },
-                ),
-                CupertinoListTile(
-                  backgroundColor: pageBackground,
-                  backgroundColorActivated: pressedBackground,
-                  leading: const Icon(CupertinoIcons.doc_text),
-                  title: const Text('导出阅读笔记'),
-                  additionalInfo: const Text('JSON'),
-                  onTap: _exportNotes,
-                ),
-              ],
-            ),
-
-            CupertinoListSection.insetGrouped(
-
-              backgroundColor: pageBackground,
-
-              header: const Text('软件更新'),
-
-              children: [
-
-                CupertinoListTile(
-
-                  backgroundColor: pageBackground,
-
-                  backgroundColorActivated: pressedBackground,
-
-                  leading: const Icon(CupertinoIcons.arrow_down_circle),
-
-                  title: const Text('检查更新'),
-
-                  additionalInfo: Text(
-
-                    _checkingUpdate ? '检查中…' : _shortUpdateRepoLabel,
-
-                  ),
-
-                  onTap: _checkingUpdate ? null : _checkForUpdate,
-
-                ),
-                CupertinoListTile(
-                  backgroundColor: pageBackground,
-                  backgroundColorActivated: pressedBackground,
-                  leading: const Icon(CupertinoIcons.gear_alt),
-                  title: const Text('更新仓库'),
-                  additionalInfo: const Text('自定义'),
-                  onTap: _editUpdateRepo,
-                ),
-                CupertinoListTile(
-                  backgroundColor: pageBackground,
-                  backgroundColorActivated: pressedBackground,
-                  leading: const Icon(CupertinoIcons.arrow_2_circlepath),
-                  title: const Text('启动时自动检查更新'),
-                  additionalInfo: Text(_autoCheckUpdate ? '开' : '关'),
-                  trailing: CupertinoSwitch(
-                    value: _autoCheckUpdate,
-                    onChanged: _setAutoCheckUpdate,
-                  ),
-                  onTap: () => _setAutoCheckUpdate(!_autoCheckUpdate),
-                ),
-
-              ],
-
-            ),
-
-            CupertinoListSection.insetGrouped(
-
-              backgroundColor: pageBackground,
-
-              header: const Text('存储管理'),
-
-              children: [
-
-                FutureBuilder<StorageUsage>(
-
-                  future: _usage,
-
-                  builder: (context, snapshot) => CupertinoListTile(
-
+                children: [
+                  CupertinoListTile(
                     backgroundColor: pageBackground,
 
                     backgroundColorActivated: pressedBackground,
 
-                    leading: const Icon(CupertinoIcons.chart_bar),
+                    leading: const Icon(CupertinoIcons.doc_text),
 
-                    title: const Text('占用空间'),
+                    title: const Text('MOBI / EPUB 转 TXT'),
+
+                    additionalInfo: const Text('独立页面'),
+
+                    onTap: () => Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const EbookToTxtPage(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              CupertinoListSection.insetGrouped(
+                backgroundColor: pageBackground,
+                header: const Text('阅读数据'),
+                children: [
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.chart_bar),
+                    title: const Text('阅读统计'),
+                    additionalInfo: Text(
+                      '今日 ${ReadingStatsService.formatDuration(_readingStats.todaySeconds)}'
+                      ' · 累计 ${ReadingStatsService.formatDuration(_readingStats.totalSeconds)}',
+                    ),
+                    onTap: () async {
+                      await Navigator.of(context).push(
+                        CupertinoPageRoute(
+                          builder: (_) => const ReadingStatsPage(),
+                        ),
+                      );
+                      await _loadReadingStats();
+                    },
+                  ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.doc_text),
+                    title: const Text('导出阅读笔记'),
+                    additionalInfo: const Text('JSON'),
+                    onTap: _exportNotes,
+                  ),
+                ],
+              ),
+
+              CupertinoListSection.insetGrouped(
+                backgroundColor: pageBackground,
+
+                header: const Text('软件更新'),
+
+                children: [
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+
+                    backgroundColorActivated: pressedBackground,
+
+                    leading: const Icon(CupertinoIcons.arrow_down_circle),
+
+                    title: const Text('检查更新'),
 
                     additionalInfo: Text(
-
-                      snapshot.data == null
-
-                          ? '计算中…'
-
-                          : _formatBytes(snapshot.data!.totalBytes),
-
+                      _checkingUpdate ? '检查中…' : _shortUpdateRepoLabel,
                     ),
 
+                    onTap: _checkingUpdate ? null : _checkForUpdate,
+                  ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.gear_alt),
+                    title: const Text('更新仓库'),
+                    additionalInfo: const Text('自定义'),
+                    onTap: _editUpdateRepo,
+                  ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.arrow_2_circlepath),
+                    title: const Text('启动时自动检查更新'),
+                    additionalInfo: Text(_autoCheckUpdate ? '开' : '关'),
+                    trailing: CupertinoSwitch(
+                      value: _autoCheckUpdate,
+                      onChanged: _setAutoCheckUpdate,
+                    ),
+                    onTap: () => _setAutoCheckUpdate(!_autoCheckUpdate),
+                  ),
+                ],
+              ),
+
+              CupertinoListSection.insetGrouped(
+                backgroundColor: pageBackground,
+
+                header: const Text('存储管理'),
+
+                children: [
+                  FutureBuilder<StorageUsage>(
+                    future: _usage,
+
+                    builder: (context, snapshot) => CupertinoListTile(
+                      backgroundColor: pageBackground,
+
+                      backgroundColorActivated: pressedBackground,
+
+                      leading: const Icon(CupertinoIcons.chart_bar),
+
+                      title: const Text('占用空间'),
+
+                      additionalInfo: Text(
+                        snapshot.data == null
+                            ? '计算中…'
+                            : _formatBytes(snapshot.data!.totalBytes),
+                      ),
+                    ),
                   ),
 
-                ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
 
-                CupertinoListTile(
+                    backgroundColorActivated: pressedBackground,
 
-                  backgroundColor: pageBackground,
+                    leading: const Icon(CupertinoIcons.book),
 
-                  backgroundColorActivated: pressedBackground,
+                    title: const Text('清空书库'),
 
-                  leading: const Icon(CupertinoIcons.book),
+                    onTap: () => _confirm(
+                      '清空书库？',
 
-                  title: const Text('清空书库'),
+                      '将删除已导入的电子书和对应阅读位置，此操作不可恢复。',
 
-                  onTap: () => _confirm(
-
-                    '清空书库？',
-
-                    '将删除已导入的电子书和对应阅读位置，此操作不可恢复。',
-
-                    widget.onClearBooks,
-
+                      widget.onClearBooks,
+                    ),
                   ),
 
-                ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
 
-                CupertinoListTile(
+                    backgroundColorActivated: pressedBackground,
 
-                  backgroundColor: pageBackground,
+                    leading: const Icon(CupertinoIcons.clock),
 
-                  backgroundColorActivated: pressedBackground,
+                    title: const Text('清除阅读记录'),
 
-                  leading: const Icon(CupertinoIcons.clock),
+                    onTap: () => _confirm(
+                      '清除阅读记录？',
 
-                  title: const Text('清除阅读记录'),
+                      '将重置所有书籍的字号、背景、阅读方式和阅读位置。',
 
-                  onTap: () => _confirm(
-
-                    '清除阅读记录？',
-
-                    '将重置所有书籍的字号、背景、阅读方式和阅读位置。',
-
-                    widget.onClearReadingStates,
-
+                      widget.onClearReadingStates,
+                    ),
                   ),
-
-                ),
-
-              ],
-
-            ),
-
-          ],
-
+                ],
+              ),
+            ],
+          ),
         ),
-
       ),
-
-      ),
-
     );
-
   }
 
   void _showFontManager(BuildContext context) {
-
     showCupertinoModalPopup(
-
       context: context,
 
       builder: (ctx) => FontManagerSheet(
-
         installedFonts: widget.installedFonts,
 
         activeFontName: widget.activeFontName,
@@ -727,12 +598,7 @@ class _SettingsPageState extends State<SettingsPage> {
         onDeleteFont: widget.onDeleteFont,
 
         onImportFonts: widget.onImportFonts,
-
       ),
-
     );
-
   }
-
 }
-

@@ -117,6 +117,44 @@ void main() {
       );
     });
 
+    test('short dialogue and English body still indent by default', () {
+      // Chinese one-word reply — not a chapter head → indent.
+      expect(
+        ReaderMarkup.shouldIndentFirstLine(
+          paragraph: '好',
+          fullParagraph: '好',
+          headingLevel: null,
+          isQuote: false,
+          isList: false,
+          isCenter: false,
+        ),
+        isTrue,
+      );
+      // English line ending with '.' — old rule missed this.
+      expect(
+        ReaderMarkup.shouldIndentFirstLine(
+          paragraph: 'He walked home.',
+          fullParagraph: 'He walked home.',
+          headingLevel: null,
+          isQuote: false,
+          isList: false,
+          isCenter: false,
+        ),
+        isTrue,
+      );
+      expect(
+        ReaderMarkup.shouldIndentFirstLine(
+          paragraph: 'Chapter 3',
+          fullParagraph: 'Chapter 3',
+          headingLevel: null,
+          isQuote: false,
+          isList: false,
+          isCenter: false,
+        ),
+        isFalse,
+      );
+    });
+
     test('whole-book center layout still indents body prose', () {
       const body = '他望着窗外的江面，心里空落落的，一句话也说不出来。';
       expect(

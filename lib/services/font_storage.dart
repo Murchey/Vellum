@@ -26,7 +26,8 @@ class FontStorage {
     final file = await _fontPreferencesFile();
     if (!await file.exists()) return const FontPreferences();
     try {
-      final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final data =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       return FontPreferences(
         useForUi: data['useForUi'] as bool? ?? false,
         useForContent: data['useForContent'] as bool? ?? false,
@@ -54,15 +55,22 @@ class FontStorage {
 
     final fonts = <InstalledFont>[];
     await for (final entity in dir.list()) {
-      if (entity is File && entity.path.endsWith('.ttf')) {
-        final name = entity.uri.pathSegments.last.replaceAll('.ttf', '');
+      if (entity is File && entity.path.toLowerCase().endsWith('.ttf')) {
+        final filename = entity.uri.pathSegments.last;
+        final name = filename.replaceFirst(
+          RegExp(r'\.ttf$', caseSensitive: false),
+          '',
+        );
         final family = 'Font_${name.hashCode.abs()}';
-        String? displayName;
+        late final String displayName;
         try {
-          final bytes = await entity.readAsBytes();
-          displayName = readTtfDisplayName(Uint8List.fromList(bytes));
+          final bytes = Uint8List.fromList(await entity.readAsBytes());
+          displayName = resolveImportedFontDisplayName(
+            bytes: bytes,
+            filename: name,
+          );
         } catch (_) {
-          displayName = null;
+          displayName = name;
         }
         fonts.add(
           InstalledFont(name: name, family: family, displayName: displayName),

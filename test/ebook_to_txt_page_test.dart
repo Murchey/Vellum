@@ -13,9 +13,7 @@ void main() {
         builder: (context, child) {
           final media = MediaQuery.of(context);
           return MediaQuery(
-            data: media.copyWith(
-              textScaler: const TextScaler.linear(1.6),
-            ),
+            data: media.copyWith(textScaler: const TextScaler.linear(1.6)),
             child: child!,
           );
         },
@@ -38,12 +36,8 @@ void main() {
             child: CupertinoButton(
               child: const Text('open'),
               onPressed: () {
-                Navigator.of(
-                  tester.element(find.text('open')),
-                ).push(
-                  CupertinoPageRoute(
-                    builder: (_) => const EbookToTxtPage(),
-                  ),
+                Navigator.of(tester.element(find.text('open'))).push(
+                  CupertinoPageRoute(builder: (_) => const EbookToTxtPage()),
                 );
               },
             ),

@@ -345,8 +345,9 @@ class EpubDecoder {
     dom.Element? tocRoot;
     for (final node in fragment.nodes.whereType<dom.Element>()) {
       if (node.localName?.toLowerCase() != 'nav') continue;
-      final type = (node.attributes['epub:type'] ?? node.attributes['type'] ?? '')
-          .toLowerCase();
+      final type =
+          (node.attributes['epub:type'] ?? node.attributes['type'] ?? '')
+              .toLowerCase();
       if (type.contains('toc') || tocRoot == null) {
         tocRoot = node;
         if (type.contains('toc')) break;

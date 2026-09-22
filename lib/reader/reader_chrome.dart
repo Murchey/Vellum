@@ -2,9 +2,8 @@ import 'package:flutter/cupertino.dart';
 
 import '../theme/vellum_theme.dart';
 
-/// Fanqie top bar (alg.xml): **44dp**, back icon at left **16dp**,
-/// centre slot shows chapter/book context (usability: Fanqie omits title
-/// but offline readers need to know where they are).
+/// Fanqie top bar (alg.xml): **44dp**, back @16dp. Chapter/book label sits
+/// **left-aligned** next to the back chevron (not centred).
 class ReaderTopBar extends StatelessWidget {
   const ReaderTopBar({
     required this.bookmarked,
@@ -18,20 +17,14 @@ class ReaderTopBar extends StatelessWidget {
   final bool bookmarked;
   final VoidCallback? onBack;
   final VoidCallback? onToggleBookmark;
-
-  /// Chapter or book label; ellipsized in the centre.
   final String title;
-
-  /// Chrome background — defaults to theme card/paper.
   final Color? surface;
 
   static const double height = 44;
 
   @override
   Widget build(BuildContext context) {
-    final bg =
-        surface ??
-        VellumTheme.readerChromeOf(context);
+    final bg = surface ?? VellumTheme.readerChromeOf(context);
     final ink = VellumTheme.readerChromeInk(bg);
     return ColoredBox(
       color: bg,
@@ -41,29 +34,24 @@ class ReaderTopBar extends StatelessWidget {
           height: height,
           child: Row(
             children: [
-              // alg.xml: ImageView marginLeft 16dp; 44dp hit target.
               CupertinoButton(
                 padding: const EdgeInsets.only(left: 16, right: 4),
                 minimumSize: const Size(48, 44),
                 onPressed: onBack,
-                child: Icon(
-                  CupertinoIcons.chevron_back,
-                  size: 26,
-                  color: ink,
-                ),
+                child: Icon(CupertinoIcons.chevron_back, size: 26, color: ink),
               ),
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  padding: const EdgeInsets.only(right: 8),
                   child: Text(
                     title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.center,
+                    textAlign: TextAlign.left,
                     style: TextStyle(
-                      color: ink.withValues(alpha: .78),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                      color: ink.withValues(alpha: .72),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w400,
                     ),
                   ),
                 ),
@@ -78,7 +66,7 @@ class ReaderTopBar extends StatelessWidget {
                       : CupertinoIcons.bookmark,
                   size: 22,
                   color: bookmarked
-                      ? VellumTheme.accentOf(context)
+                      ? VellumTheme.readerAccentOf(context)
                       : ink.withValues(alpha: .85),
                 ),
               ),
@@ -90,54 +78,104 @@ class ReaderTopBar extends StatelessWidget {
   }
 }
 
-/// Bottom status pill (Fanqie BottomIndicatorContainer): marginBottom 18dp.
+/// Fanqie BottomIndicator: **page number + battery only**.
 class ReaderStatusBar extends StatelessWidget {
   const ReaderStatusBar({
-    required this.progressLabel,
+    required this.pageLabel,
     required this.batteryLabel,
-    required this.chapterLabel,
-    required this.remainingLabel,
     this.surface,
     super.key,
   });
 
-  final String progressLabel;
+  final String pageLabel;
   final String batteryLabel;
-  final String chapterLabel;
-  final String remainingLabel;
   final Color? surface;
 
   @override
   Widget build(BuildContext context) {
     final bg = surface ?? VellumTheme.readerChromeOf(context);
     final ink = VellumTheme.readerChromeInk(bg);
-    final lines = <String>[
-      if (progressLabel.isNotEmpty) progressLabel,
-      if (chapterLabel.isNotEmpty) chapterLabel,
-      if (remainingLabel.isNotEmpty) remainingLabel,
-      if (batteryLabel.isNotEmpty) batteryLabel,
-    ];
-    if (lines.isEmpty) return const SizedBox.shrink();
+    if (pageLabel.isEmpty && batteryLabel.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return SafeArea(
       top: false,
       child: Align(
         alignment: Alignment.bottomCenter,
         child: Padding(
           padding: const EdgeInsets.only(bottom: 18),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-            decoration: BoxDecoration(
-              color: bg.withValues(alpha: .92),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: ink.withValues(alpha: .12),
-              ),
-            ),
-            child: Text(
-              lines.join(' · '),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: ink.withValues(alpha: .72), fontSize: 12, height: 1.25),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (pageLabel.isNotEmpty)
+                Text(
+                  pageLabel,
+                  style: TextStyle(
+                    color: ink.withValues(alpha: .55),
+                    fontSize: 11,
+                    height: 1.2,
+                  ),
+                ),
+              if (pageLabel.isNotEmpty && batteryLabel.isNotEmpty)
+                const SizedBox(width: 14),
+              if (batteryLabel.isNotEmpty)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      CupertinoIcons.battery_75_percent,
+                      size: 14,
+                      color: ink.withValues(alpha: .55),
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      batteryLabel,
+                      style: TextStyle(
+                        color: ink.withValues(alpha: .55),
+                        fontSize: 11,
+                        height: 1.2,
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Top-left running head while chrome is hidden (Fanqie page header).
+class ReaderRunningHead extends StatelessWidget {
+  const ReaderRunningHead({
+    required this.chapterLabel,
+    this.surface,
+    super.key,
+  });
+
+  final String chapterLabel;
+  final Color? surface;
+
+  @override
+  Widget build(BuildContext context) {
+    if (chapterLabel.isEmpty) return const SizedBox.shrink();
+    final bg = surface ?? VellumTheme.readerChromeOf(context);
+    final ink = VellumTheme.readerChromeInk(bg);
+    return SafeArea(
+      bottom: false,
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 20, top: 4),
+          child: Text(
+            chapterLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: ink.withValues(alpha: .38),
+              fontSize: 11,
+              height: 1.2,
             ),
           ),
         ),
@@ -153,6 +191,8 @@ class BookmarkRibbon extends StatelessWidget {
     required this.armed,
     required this.alreadyBookmarked,
     required this.label,
+    this.pinned = false,
+    this.showLabel = true,
     super.key,
   });
 
@@ -161,78 +201,106 @@ class BookmarkRibbon extends StatelessWidget {
   final bool alreadyBookmarked;
   final String label;
 
+  /// A saved bookmark remains as a physical tab on the right page edge.
+  final bool pinned;
+
+  /// Pull feedback has a caption; the persistent tab intentionally does not.
+  final bool showLabel;
+
   @override
   Widget build(BuildContext context) {
-    final accent = VellumTheme.accentOf(context);
-    final ribbonLength = (28 + progress * 52).clamp(28.0, 90.0);
-    final ribbonColor = armed
+    final accent = VellumTheme.readerAccentOf(context);
+    final ribbonLength = (pinned ? 72.0 : 28 + progress * 52).clamp(28.0, 90.0);
+    final ribbonColor = pinned
         ? accent
-        : (alreadyBookmarked
-              ? accent.withValues(alpha: .55)
-              : VellumTheme.mutedOf(context).withValues(alpha: .7));
+        : (armed
+              ? accent
+              : (alreadyBookmarked
+                    ? accent.withValues(alpha: .55)
+                    : VellumTheme.mutedOf(context).withValues(alpha: .7)));
     return IgnorePointer(
       child: SafeArea(
         child: Align(
-          alignment: Alignment.topCenter,
+          alignment: Alignment.topRight,
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Container(
-                width: 22,
-                height: ribbonLength,
-                decoration: BoxDecoration(
-                  color: ribbonColor,
-                  borderRadius: const BorderRadius.vertical(
-                    bottom: Radius.circular(4),
-                  ),
-                ),
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Icon(
-                      armed || alreadyBookmarked
-                          ? CupertinoIcons.bookmark_fill
-                          : CupertinoIcons.bookmark,
-                      size: 14,
-                      color: CupertinoColors.white,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Opacity(
-                opacity: progress.clamp(0.25, 1.0),
+              ClipPath(
+                clipper: const _BookmarkNotchClipper(),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: VellumTheme.readerChromeOf(context).withValues(
-                      alpha: .94,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: armed
-                          ? accent.withValues(alpha: .55)
-                          : VellumTheme.lineOf(context),
-                    ),
-                  ),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: armed ? accent : VellumTheme.inkOf(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                  width: pinned ? 28 : 22,
+                  height: ribbonLength,
+                  color: ribbonColor,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Icon(
+                        armed || alreadyBookmarked || pinned
+                            ? CupertinoIcons.bookmark_fill
+                            : CupertinoIcons.bookmark,
+                        size: 14,
+                        color: CupertinoColors.white,
+                      ),
                     ),
                   ),
                 ),
               ),
+              if (showLabel) ...[
+                const SizedBox(height: 6),
+                Opacity(
+                  opacity: progress.clamp(0.25, 1.0),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: VellumTheme.readerChromeOf(
+                        context,
+                      ).withValues(alpha: .94),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: armed
+                            ? accent.withValues(alpha: .55)
+                            : VellumTheme.lineOf(context),
+                      ),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: armed ? accent : VellumTheme.inkOf(context),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
       ),
     );
   }
+}
+
+/// Creates the V-shaped cut at the bottom of a paper bookmark tab.
+class _BookmarkNotchClipper extends CustomClipper<Path> {
+  const _BookmarkNotchClipper();
+
+  @override
+  Path getClip(Size size) {
+    final notchDepth = (size.height * .18).clamp(5.0, 11.0);
+    return Path()
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height)
+      ..lineTo(size.width / 2, size.height - notchDepth)
+      ..lineTo(0, size.height)
+      ..close();
+  }
+
+  @override
+  bool shouldReclip(covariant _BookmarkNotchClipper oldClipper) => false;
 }

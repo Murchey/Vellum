@@ -90,18 +90,14 @@ class ReaderParagraph extends StatelessWidget {
         ? 1.0
         : ReaderMarkup.headingFontScale(effectiveHeading);
     final displayFontSize = fontSize * scale;
-    final bodyInk = target == null
-        ? ink
-        : VellumTheme.accentOf(context);
+    final bodyInk = target == null ? ink : VellumTheme.readerAccentOf(context);
     final textStyle = TextStyle(
       fontFamily: fontFamily,
       fontSize: displayFontSize,
       height: effectiveHeading == null
           ? lineSpacing.height
           : ReaderMarkup.headingLineHeight(effectiveHeading),
-      fontWeight: effectiveHeading == null
-          ? fontWeight.value
-          : FontWeight.w700,
+      fontWeight: effectiveHeading == null ? fontWeight.value : FontWeight.w700,
       fontStyle: isQuote ? FontStyle.italic : null,
       color: bodyInk,
       decoration: target == null ? null : TextDecoration.underline,
@@ -139,7 +135,7 @@ class ReaderParagraph extends StatelessWidget {
         highlights: highlights,
         highlightColor:
             highlightColor ??
-            VellumTheme.accentOf(context).withValues(alpha: .22),
+            VellumTheme.readerAccentOf(context).withValues(alpha: .22),
       ),
     ];
     final alignment = effectiveHeading != null
@@ -162,7 +158,9 @@ class ReaderParagraph extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(
                 left: BorderSide(
-                  color: VellumTheme.accentOf(context).withValues(alpha: .7),
+                  color: VellumTheme.readerAccentOf(
+                    context,
+                  ).withValues(alpha: .7),
                   width: 3,
                 ),
               ),

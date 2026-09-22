@@ -19,7 +19,9 @@ void main() {
         BookTocEntry(title: '第一章', paragraphIndex: 0),
         BookTocEntry(title: '第二章 "引"', paragraphIndex: 2),
       ],
-      imageBytes: {1: Uint8List.fromList([1, 2, 3, 255])},
+      imageBytes: {
+        1: Uint8List.fromList([1, 2, 3, 255]),
+      },
     );
 
     test('round-trips every field through chunked JSON', () {
@@ -36,7 +38,9 @@ void main() {
         {'title': '第一章', 'paragraphIndex': 0},
         {'title': '第二章 "引"', 'paragraphIndex': 2},
       ]);
-      expect(decoded['imageBytes'], {'1': base64Encode([1, 2, 3, 255])});
+      expect(decoded['imageBytes'], {
+        '1': base64Encode([1, 2, 3, 255]),
+      });
     });
 
     test('streams a large book instead of buffering one string', () {
@@ -66,17 +70,11 @@ void main() {
     test('leaves plain prose untouched', () {
       const plain = '他只是站在那里，看着窗外。';
       expect(pipeline.normalizeReaderMarkup(plain), plain);
-      expect(
-        pipeline.splitParagraphs('第一段\n\n第二段'),
-        ['第一段', '第二段'],
-      );
+      expect(pipeline.splitParagraphs('第一段\n\n第二段'), ['第一段', '第二段']);
     });
 
     test('still rewrites markup hints', () {
-      expect(
-        pipeline.normalizeReaderMarkup('## 标题'),
-        '[[vellum-heading:2]]标题',
-      );
+      expect(pipeline.normalizeReaderMarkup('## 标题'), '[[vellum-heading:2]]标题');
       expect(pipeline.normalizeReaderMarkup('> 引用'), '[[vellum-quote]]引用');
       expect(pipeline.normalizeReaderMarkup('- 列表项'), '[[vellum-list]]列表项');
       expect(pipeline.normalizeReaderMarkup('**粗体**'), '[[b]]粗体[[/b]]');
@@ -109,13 +107,14 @@ void main() {
 
       final pipeline = const HtmlTextPipeline();
       final paragraphs = pipeline.splitParagraphs(pipeline.htmlToText(source));
-      final entries = const MobiDecoder().mobiTocEntries(source, paragraphs, 1252);
+      final entries = const MobiDecoder().mobiTocEntries(
+        source,
+        paragraphs,
+        1252,
+      );
 
       expect(entries.map((entry) => entry.title).toList(), titles);
-      expect(
-        entries.map((entry) => entry.paragraphIndex).toList(),
-        [1, 3, 5],
-      );
+      expect(entries.map((entry) => entry.paragraphIndex).toList(), [1, 3, 5]);
     });
 
     test('keeps hundreds of anchors ordered', () {
@@ -134,7 +133,11 @@ void main() {
 
       final pipeline = const HtmlTextPipeline();
       final paragraphs = pipeline.splitParagraphs(pipeline.htmlToText(source));
-      final entries = const MobiDecoder().mobiTocEntries(source, paragraphs, 1252);
+      final entries = const MobiDecoder().mobiTocEntries(
+        source,
+        paragraphs,
+        1252,
+      );
 
       expect(entries.length, 300);
       for (var index = 1; index < entries.length; index++) {

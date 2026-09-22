@@ -140,12 +140,21 @@ class _ReaderMenuState extends State<ReaderMenu>
   @override
   void initState() {
     super.initState();
+    _chromeAnim.addStatusListener(_onChromeAnimationStatus);
     if (widget.visible) _chromeAnim.value = 1;
+  }
+
+  void _onChromeAnimationStatus(AnimationStatus _) {
+    // SlideTransition repaints itself, but the parent must rebuild at the end
+    // of the reverse animation to remove the back/bookmark buttons entirely.
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _chromeAnim.dispose();
+    _chromeAnim
+      ..removeStatusListener(_onChromeAnimationStatus)
+      ..dispose();
     super.dispose();
   }
 
@@ -172,7 +181,8 @@ class _ReaderMenuState extends State<ReaderMenu>
   }
 
   void _togglePanel(_AbovePanel panel) {
-    if (_throttled) return;
+    // No debounce on panel open/close — a blocked second tap felt like the
+    // menu was broken. Only day/night theme flip stays lightly throttled.
     setState(() => _panel = _panel == panel ? _AbovePanel.none : panel);
   }
 
@@ -222,9 +232,21 @@ class _ReaderMenuState extends State<ReaderMenu>
     ).animate(CurvedAnimation(parent: _chromeAnim, curve: Curves.easeOutCubic));
     final chromeVisible = widget.visible || _chromeAnim.isAnimating;
 
-    // Exact bottom chrome height (Progress 65 + line 1 + pad 2+56+2 + safe).
+    // Bottom chrome always shows progress + actions so seek stays usable
+    // while a catalog/settings sheet is open.
     final bottomChrome = 65.0 + 1 + 2 + 56 + 2 + bottomSafe;
     final bandTop = ReaderTopBar.height + topSafe;
+    final screenHeight = media.size.height;
+
+    // Catalog / settings: half-screen sheet, bottom-anchored on chrome.
+    // Minimum keeps first-level settings usable on short viewports/tests;
+    // content taller than the sheet scrolls inside the panel.
+    final maxPanel = (screenHeight - bandTop - bottomChrome).clamp(
+      200.0,
+      double.infinity,
+    );
+    final panelHeight = (screenHeight * 0.5).clamp(360.0, maxPanel);
+    final panelTop = screenHeight - bottomChrome - panelHeight;
 
     return Positioned.fill(
       child: IgnorePointer(
@@ -245,12 +267,12 @@ class _ReaderMenuState extends State<ReaderMenu>
                 ),
               ),
 
-            // Catalog / settings fill the band — sealed to bottom chrome.
+            // Half-screen sheet above the action bar (seek row stays under it).
             if (_panel != _AbovePanel.none)
               Positioned(
                 left: 0,
                 right: 0,
-                top: bandTop,
+                top: panelTop,
                 bottom: bottomChrome,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
@@ -261,10 +283,47 @@ class _ReaderMenuState extends State<ReaderMenu>
                         width: 0.5,
                       ),
                     ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: CupertinoColors.black.withValues(alpha: .10),
+                        blurRadius: 12,
+                        offset: const Offset(0, -2),
+                      ),
+                    ],
                   ),
-                  child: _panel == _AbovePanel.catalog
-                      ? _catalogPanel(context, themeBg)
-                      : _settingsPanel(context, themeBg),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Grabber: tap or flick down closes the sheet only.
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _closePanel,
+                        onVerticalDragEnd: (details) {
+                          if ((details.primaryVelocity ?? 0) > 280) {
+                            _closePanel();
+                          }
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Center(
+                            child: Container(
+                              width: 36,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: chromeInk.withValues(alpha: .22),
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: _panel == _AbovePanel.catalog
+                            ? _catalogPanel(context, themeBg)
+                            : _settingsPanel(context, themeBg),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
@@ -273,16 +332,22 @@ class _ReaderMenuState extends State<ReaderMenu>
                 top: 0,
                 left: 0,
                 right: 0,
-                child: SlideTransition(
-                  position: topSlide,
-                  child: ReaderTopBar(
-                    bookmarked: widget.bookmarked,
-                    title: widget.chapterTitle.isNotEmpty
-                        ? widget.chapterTitle
-                        : widget.bookTitle,
-                    surface: themeBg,
-                    onBack: _handleTopBarBack,
-                    onToggleBookmark: widget.onToggleBookmark,
+                child: ClipRect(
+                  child: SizeTransition(
+                    sizeFactor: _chromeAnim,
+                    alignment: Alignment.topCenter,
+                    child: SlideTransition(
+                      position: topSlide,
+                      child: ReaderTopBar(
+                        bookmarked: widget.bookmarked,
+                        title: widget.chapterTitle.isNotEmpty
+                            ? widget.chapterTitle
+                            : widget.bookTitle,
+                        surface: themeBg,
+                        onBack: _handleTopBarBack,
+                        onToggleBookmark: widget.onToggleBookmark,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -322,13 +387,11 @@ class _ReaderMenuState extends State<ReaderMenu>
   /// Progress row: labels are tappable chapter steps + seek bar.
   Widget _progressRow(BuildContext context, Color themeBg) {
     final ink = VellumTheme.readerChromeInk(themeBg);
-    final accent = VellumTheme.accentOf(context);
+    final accent = VellumTheme.readerAccentOf(context);
     final hasChapters = widget.chapterCount > 1;
     final chapterMax = (widget.chapterCount - 1).clamp(0, 1 << 30);
     final chapterValue = widget.currentChapterIndex.clamp(0, chapterMax);
-    final atStart = hasChapters
-        ? chapterValue <= 0
-        : widget.progress <= 0.001;
+    final atStart = hasChapters ? chapterValue <= 0 : widget.progress <= 0.001;
     final atEnd = hasChapters
         ? chapterValue >= chapterMax
         : widget.progress >= 0.999;
@@ -345,7 +408,11 @@ class _ReaderMenuState extends State<ReaderMenu>
       }
     }
 
-    Widget stepLabel(String text, {required bool enabled, VoidCallback? onTap}) {
+    Widget stepLabel(
+      String text, {
+      required bool enabled,
+      VoidCallback? onTap,
+    }) {
       final color = ink.withValues(alpha: enabled ? .9 : .32);
       return CupertinoButton(
         padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -449,7 +516,7 @@ class _ReaderMenuState extends State<ReaderMenu>
     required bool selected,
     required VoidCallback onTap,
   }) {
-    final accent = VellumTheme.accentOf(context);
+    final accent = VellumTheme.readerAccentOf(context);
     final ink = VellumTheme.readerChromeInk(themeBg);
     return Expanded(
       child: CupertinoButton(

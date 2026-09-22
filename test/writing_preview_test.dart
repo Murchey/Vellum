@@ -48,9 +48,7 @@ void main() {
     });
 
     test('keeps text that merely contains a bracket', () {
-      final paragraphs = markdownPreviewParagraphs(
-        '普通段落，带 <尖括号> 与 A < B。',
-      );
+      final paragraphs = markdownPreviewParagraphs('普通段落，带 <尖括号> 与 A < B。');
 
       expect(paragraphs.single, '普通段落，带 <尖括号> 与 A < B。');
     });
@@ -84,7 +82,9 @@ void main() {
       tester,
     ) async {
       await tester.pumpWidget(
-        CupertinoApp(home: WritingEditorPage(document: draft(WritingFormat.md))),
+        CupertinoApp(
+          home: WritingEditorPage(document: draft(WritingFormat.md)),
+        ),
       );
       await tester.pump();
 
@@ -109,7 +109,9 @@ void main() {
 
     testWidgets('plain text drafts offer no preview', (tester) async {
       await tester.pumpWidget(
-        CupertinoApp(home: WritingEditorPage(document: draft(WritingFormat.txt))),
+        CupertinoApp(
+          home: WritingEditorPage(document: draft(WritingFormat.txt)),
+        ),
       );
       await tester.pump();
 

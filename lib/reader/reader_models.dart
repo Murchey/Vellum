@@ -74,12 +74,11 @@ enum PageTurnStyle {
 /// 0.68em / 1em on a 1.4 base) plus a custom clamp of 4.0–44.0px. Flutter's
 /// `TextStyle.height` is a font-size multiplier, so the presets below map the
 /// same feel onto multipliers: 超窄≈1.4+0.15, 窄≈1.4+0.3, 标准≈1.4+0.5,
-/// 宽松≈1.4+0.8. Legacy storage names (`comfortable`…) still resolve.
+/// 宽松≈1.4+0.8. Older persisted `comfortable` values map to `standard`.
 enum ReaderLineSpacing {
   xNarrow('超窄', 1.45),
   narrow('窄', 1.7),
   standard('标准', 1.9),
-  comfortable('舒适', 1.9),
   relaxed('宽松', 2.2);
 
   const ReaderLineSpacing(this.label, this.height);
@@ -87,11 +86,13 @@ enum ReaderLineSpacing {
   final String label;
   final double height;
 
-  static ReaderLineSpacing fromStorage(String value) =>
-      ReaderLineSpacing.values.firstWhere(
-        (spacing) => spacing.name == value,
-        orElse: () => ReaderLineSpacing.standard,
-      );
+  static ReaderLineSpacing fromStorage(String value) {
+    if (value == 'comfortable') return ReaderLineSpacing.standard;
+    return ReaderLineSpacing.values.firstWhere(
+      (spacing) => spacing.name == value,
+      orElse: () => ReaderLineSpacing.standard,
+    );
+  }
 }
 
 /// Warm-tint overlay laid over the reading surface. [opacity] is the strength

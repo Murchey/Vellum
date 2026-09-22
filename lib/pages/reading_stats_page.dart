@@ -62,7 +62,11 @@ class _ReadingStatsPageState extends State<ReadingStatsPage> {
 
     return CupertinoPageScaffold(
       backgroundColor: pageBackground,
-      navigationBar: const CupertinoNavigationBar(middle: Text('阅读统计')),
+      navigationBar: CupertinoNavigationBar(
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
+        middle: const Text('阅读统计'),
+      ),
       child: SafeArea(
         child: _loading
             ? const Center(child: CupertinoActivityIndicator())
@@ -105,10 +109,7 @@ class _ReadingStatsPageState extends State<ReadingStatsPage> {
                             CupertinoListTile(
                               backgroundColor: pageBackground,
                               backgroundColorActivated: pressedBackground,
-                              leading: Icon(
-                                CupertinoIcons.book,
-                                color: muted,
-                              ),
+                              leading: Icon(CupertinoIcons.book, color: muted),
                               title: Text(
                                 '暂无阅读记录',
                                 style: TextStyle(color: muted),

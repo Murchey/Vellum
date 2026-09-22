@@ -38,9 +38,7 @@ class BookImporter {
   ImportedBook decode({required String filename, required Uint8List bytes}) {
     final format = formatForFilename(filename);
     if (format == BookFormat.txt && bytes.length > maxTxtBytes) {
-      throw const BookImportException(
-        'TXT 文件超过 100 MB，请先拆分后再导入。',
-      );
+      throw const BookImportException('TXT 文件超过 100 MB，请先拆分后再导入。');
     }
     final book = switch (format) {
       BookFormat.txt => _decodeTxt(filename, bytes),

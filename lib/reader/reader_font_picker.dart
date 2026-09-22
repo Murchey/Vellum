@@ -4,6 +4,21 @@ import '../services/book_library.dart';
 import '../theme/vellum_theme.dart';
 import '../widgets/font_preview.dart';
 
+/// Fanqie-style font picker data: only the built-in system font is listed by
+/// default. User-imported fonts are appended from the real installed list;
+/// unavailable licensed fonts are never advertised.
+const fanqieReaderFonts = <ReaderFontOption>[
+  ReaderFontOption('Default', '系统字体'),
+];
+
+class ReaderFontOption {
+  const ReaderFontOption(this.family, this.title);
+  final String family;
+  final String title;
+}
+
+/// Fanqie-style font picker: a plain full-width list, preview glyph on the
+/// right, orange selected state, and no decorative card treatment.
 class ReaderFontPickerSheet extends StatelessWidget {
   const ReaderFontPickerSheet({
     required this.installedFonts,
@@ -18,148 +33,138 @@ class ReaderFontPickerSheet extends StatelessWidget {
   final ValueChanged<String> onSelectSystemFont;
   final Future<void> Function(InstalledFont) onSelectImportedFont;
 
-  static const _systemFonts = <MapEntry<String, String>>[
-    MapEntry('Georgia', '系统默认'),
-    MapEntry('serif', '系统衬线'),
-    MapEntry('sans-serif', '系统无衬线'),
-  ];
-
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: BoxConstraints(
-      maxHeight: MediaQuery.sizeOf(context).height * .72,
-    ),
-    decoration: BoxDecoration(
-      color: VellumTheme.cardOf(context),
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-    ),
-    child: SafeArea(
-      top: false,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 12, 8),
-            child: Row(
-              children: [
-                Icon(
-                  CupertinoIcons.textformat,
-                  color: VellumTheme.accentOf(context),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '阅读字体',
-                  style: TextStyle(
-                    color: VellumTheme.inkOf(context),
-                    fontSize: 17,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Spacer(),
-                CupertinoButton(
-                  padding: EdgeInsets.zero,
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('完成'),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-              children: [
-                Text(
-                  '系统字体',
-                  style: TextStyle(color: VellumTheme.mutedOf(context)),
-                ),
-                const SizedBox(height: 8),
-                for (final font in _systemFonts)
-                  _systemFontTile(context, font.key, font.value),
-                const SizedBox(height: 14),
-                Text(
-                  '已导入字体',
-                  style: TextStyle(color: VellumTheme.mutedOf(context)),
-                ),
-                const SizedBox(height: 8),
-                if (installedFonts.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 20),
-                    child: Text(
-                      '尚未导入字体，可在主页面“设置 → 字体管理”中导入 TTF。',
-                      style: TextStyle(color: VellumTheme.mutedOf(context)),
+  Widget build(BuildContext context) {
+    final ink = VellumTheme.readerChromeInk(
+      VellumTheme.readerChromeOf(context),
+    );
+    final muted = ink.withValues(alpha: .55);
+    final accent = VellumTheme.readerAccentOf(context);
+    final itemCount = fanqieReaderFonts.length + installedFonts.length;
+    return Container(
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.sizeOf(context).height * .78,
+      ),
+      decoration: BoxDecoration(
+        color: VellumTheme.readerChromeOf(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            SizedBox(
+              height: 52,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Text(
+                    '选择字体',
+                    style: TextStyle(
+                      color: ink,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                for (final font in installedFonts)
-                  _importedFontTile(context, font),
-              ],
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: CupertinoButton(
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('完成', style: TextStyle(color: accent)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(height: .5, color: ink.withValues(alpha: .1)),
+            Expanded(
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                itemCount: itemCount,
+                separatorBuilder: (_, _) =>
+                    Container(height: .5, color: ink.withValues(alpha: .08)),
+                itemBuilder: (context, index) {
+                  if (index < fanqieReaderFonts.length) {
+                    final option = fanqieReaderFonts[index];
+                    return _row(
+                      title: option.title,
+                      family: option.family == 'Default' ? null : option.family,
+                      selected:
+                          activeFamily == option.family ||
+                          (option.family == 'Default' &&
+                              (activeFamily.isEmpty ||
+                                  activeFamily == 'Georgia')),
+                      muted: muted,
+                      accent: accent,
+                      ink: ink,
+                      onTap: () => onSelectSystemFont(
+                        option.family == 'Default' ? 'Georgia' : option.family,
+                      ),
+                    );
+                  }
+                  final font = installedFonts[index - fanqieReaderFonts.length];
+                  return _row(
+                    title: font.label,
+                    family: font.family,
+                    selected: activeFamily == font.family,
+                    muted: muted,
+                    accent: accent,
+                    ink: ink,
+                    custom: FontPreview(font: font, compact: true),
+                    onTap: () => onSelectImportedFont(font),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row({
+    required String title,
+    required String? family,
+    required bool selected,
+    required Color muted,
+    required Color accent,
+    required Color ink,
+    required VoidCallback onTap,
+    Widget? custom,
+  }) => CupertinoButton(
+    padding: EdgeInsets.zero,
+    onPressed: onTap,
+    child: Container(
+      height: 58,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      color: selected ? accent.withValues(alpha: .08) : null,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              style: TextStyle(
+                color: selected ? accent : ink,
+                fontSize: 16,
+                fontFamily: family,
+                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+              ),
             ),
           ),
+          if (custom != null)
+            SizedBox(width: 150, child: custom)
+          else
+            Text(
+              '永Aa',
+              style: TextStyle(color: muted, fontSize: 16, fontFamily: family),
+            ),
+          if (selected) ...[
+            const SizedBox(width: 12),
+            Icon(CupertinoIcons.checkmark_alt, size: 18, color: accent),
+          ],
         ],
       ),
     ),
   );
-
-  Widget _systemFontTile(BuildContext context, String family, String name) =>
-      CupertinoButton(
-        padding: const EdgeInsets.only(bottom: 8),
-        onPressed: () => onSelectSystemFont(family),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: activeFamily == family
-                  ? VellumTheme.accentOf(context)
-                  : VellumTheme.lineOf(context),
-              width: activeFamily == family ? 2 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(name, style: TextStyle(color: VellumTheme.inkOf(context))),
-              const SizedBox(height: 6),
-              Text(
-                '中文示例：阅读改变生活\nEnglish: Reading changes life',
-                style: TextStyle(
-                  fontFamily: family,
-                  fontSize: 17,
-                  height: 1.45,
-                  color: VellumTheme.inkOf(context),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-
-  Widget _importedFontTile(BuildContext context, InstalledFont font) =>
-      CupertinoButton(
-        padding: const EdgeInsets.only(bottom: 8),
-        onPressed: () => onSelectImportedFont(font),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: activeFamily == font.family
-                  ? VellumTheme.accentOf(context)
-                  : VellumTheme.lineOf(context),
-              width: activeFamily == font.family ? 2 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                font.label,
-                style: TextStyle(color: VellumTheme.inkOf(context)),
-              ),
-              const SizedBox(height: 6),
-              FontPreview(font: font),
-            ],
-          ),
-        ),
-      );
 }

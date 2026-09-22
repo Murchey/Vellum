@@ -16,11 +16,7 @@ class UpdateCheckException implements Exception {
 
 /// Parsed remote repository reference.
 class RepoRef {
-  const RepoRef({
-    required this.host,
-    required this.owner,
-    required this.repo,
-  });
+  const RepoRef({required this.host, required this.owner, required this.repo});
 
   final String host;
   final String owner;
@@ -96,9 +92,7 @@ class VellumReleaseInfo {
     final list = <UpdateApkAsset>[];
     for (final entry in assets.entries) {
       final abi = detectAbiFromAssetName(entry.key);
-      list.add(
-        UpdateApkAsset(name: entry.key, url: entry.value, abi: abi),
-      );
+      list.add(UpdateApkAsset(name: entry.key, url: entry.value, abi: abi));
     }
     list.sort((a, b) {
       final rank = _abiRank(a.abi).compareTo(_abiRank(b.abi));
@@ -178,7 +172,9 @@ String? detectAbiFromAssetName(String name) {
       lower.contains('arm-32')) {
     return 'armeabi-v7a';
   }
-  if (lower.contains('x86_64') || lower.contains('x86-64') || lower.contains('amd64')) {
+  if (lower.contains('x86_64') ||
+      lower.contains('x86-64') ||
+      lower.contains('amd64')) {
     return 'x86_64';
   }
   if (RegExp(r'(^|[^0-9])x86([^0-9_]|$)').hasMatch(lower)) return 'x86';
@@ -247,9 +243,7 @@ class VellumUpdateService {
       throw UpdateCheckException('无法访问 ${ref.host}：$error');
     }
     if (data == null) {
-      throw UpdateCheckException(
-        '未能读取 ${ref.toString()} 的 Release，请确认仓库名与网络。',
-      );
+      throw UpdateCheckException('未能读取 ${ref.toString()} 的 Release，请确认仓库名与网络。');
     }
 
     final tag = (data['tag_name'] as String? ?? '').trim();

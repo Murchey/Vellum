@@ -47,6 +47,8 @@ class HomePage extends StatelessWidget {
 
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
         middle: Text(
           'VELLUM',
           style: TextStyle(

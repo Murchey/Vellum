@@ -3,10 +3,7 @@ import 'package:vellum/services/vellum_update_service.dart';
 
 void main() {
   test('detects ABI labels from release asset names', () {
-    expect(
-      detectAbiFromAssetName('Vellum-V1.0.2-arm64-v8a.apk'),
-      'arm64-v8a',
-    );
+    expect(detectAbiFromAssetName('Vellum-V1.0.2-arm64-v8a.apk'), 'arm64-v8a');
     expect(
       detectAbiFromAssetName('app-armeabi-v7a-release.apk'),
       'armeabi-v7a',

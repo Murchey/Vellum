@@ -79,7 +79,7 @@ class _MarkdownPreviewState extends State<MarkdownPreview> {
           paragraphIndex: index,
           fontSize: widget.fontSize,
           fontFamily: VellumTheme.contentFontFamily,
-          lineSpacing: ReaderLineSpacing.comfortable,
+          lineSpacing: ReaderLineSpacing.standard,
           fontWeight: ReaderFontWeight.regular,
           ink: VellumTheme.inkOf(context),
           showImage: false,

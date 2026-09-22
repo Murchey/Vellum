@@ -34,7 +34,8 @@ Future<void> checkForUpdates(
     }
     await showUpdateSheet(context, release);
   } on UpdateCheckException catch (error) {
-    if (!quiet && context.mounted) await showUpdateMessage(context, error.message);
+    if (!quiet && context.mounted)
+      await showUpdateMessage(context, error.message);
   } catch (error) {
     if (!quiet && context.mounted) {
       await showUpdateMessage(context, '检查更新失败：$error');
@@ -321,7 +322,9 @@ class _UpdateSheetState extends State<UpdateSheet> {
                     : (_received / _total!).clamp(0.0, 1.0),
                 minHeight: 6,
                 backgroundColor: VellumTheme.softAccentOf(context),
-                valueColor: AlwaysStoppedAnimation(VellumTheme.accentOf(context)),
+                valueColor: AlwaysStoppedAnimation(
+                  VellumTheme.accentOf(context),
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -421,13 +424,11 @@ class _UpdateSheetState extends State<UpdateSheet> {
             CupertinoButton.filled(
               padding: const EdgeInsets.symmetric(vertical: 12),
               onPressed: _assets.isEmpty ? null : _start,
-              child: Text(
-                switch (_phase) {
-                  _UpdatePhase.failed => '重试',
-                  _UpdatePhase.ready => '安装',
-                  _ => _installer.canInstallInApp ? '下载并更新' : '打开下载页',
-                },
-              ),
+              child: Text(switch (_phase) {
+                _UpdatePhase.failed => '重试',
+                _UpdatePhase.ready => '安装',
+                _ => _installer.canInstallInApp ? '下载并更新' : '打开下载页',
+              }),
             ),
             const SizedBox(height: 4),
             Row(

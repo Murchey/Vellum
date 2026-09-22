@@ -66,27 +66,27 @@ void main() {
         ArchiveFile.string(
           'OPS/book.opf',
           '<package>'
-          '<metadata><dc:title>目录书</dc:title></metadata>'
-          '<manifest>'
-          '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
-          '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
-          '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>'
-          '</manifest>'
-          '<spine toc="ncx">'
-          '<itemref idref="c1"/><itemref idref="c2"/>'
-          '</spine>'
-          '</package>',
+              '<metadata><dc:title>目录书</dc:title></metadata>'
+              '<manifest>'
+              '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>'
+              '<item id="c1" href="c1.xhtml" media-type="application/xhtml+xml"/>'
+              '<item id="c2" href="c2.xhtml" media-type="application/xhtml+xml"/>'
+              '</manifest>'
+              '<spine toc="ncx">'
+              '<itemref idref="c1"/><itemref idref="c2"/>'
+              '</spine>'
+              '</package>',
         ),
       )
       ..addFile(
         ArchiveFile.string(
           'OPS/toc.ncx',
           '<ncx><navMap>'
-          '<navPoint><navLabel><text>第一章</text></navLabel>'
-          '<content src="c1.xhtml#s1"/></navPoint>'
-          '<navPoint><navLabel><text>第二章</text></navLabel>'
-          '<content src="c2.xhtml"/></navPoint>'
-          '</navMap></ncx>',
+              '<navPoint><navLabel><text>第一章</text></navLabel>'
+              '<content src="c1.xhtml#s1"/></navPoint>'
+              '<navPoint><navLabel><text>第二章</text></navLabel>'
+              '<content src="c2.xhtml"/></navPoint>'
+              '</navMap></ncx>',
         ),
       )
       ..addFile(
@@ -126,21 +126,21 @@ void main() {
         ArchiveFile.string(
           'EPUB/package.opf',
           '<package>'
-          '<metadata><dc:title>Nav 书</dc:title></metadata>'
-          '<manifest>'
-          '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
-          '<item id="body" href="body.xhtml" media-type="application/xhtml+xml"/>'
-          '</manifest>'
-          '<spine><itemref idref="body"/></spine>'
-          '</package>',
+              '<metadata><dc:title>Nav 书</dc:title></metadata>'
+              '<manifest>'
+              '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>'
+              '<item id="body" href="body.xhtml" media-type="application/xhtml+xml"/>'
+              '</manifest>'
+              '<spine><itemref idref="body"/></spine>'
+              '</package>',
         ),
       )
       ..addFile(
         ArchiveFile.string(
           'EPUB/nav.xhtml',
           '<html><body><nav epub:type="toc"><ol>'
-          '<li><a href="body.xhtml#start">开篇</a></li>'
-          '</ol></nav></body></html>',
+              '<li><a href="body.xhtml#start">开篇</a></li>'
+              '</ol></nav></body></html>',
         ),
       )
       ..addFile(
@@ -266,12 +266,54 @@ void main() {
   test('resolves MOBI recindex images with 1-based record mapping', () {
     // 1x1 red JPEG and 1x1 blue JPEG (minimal valid SOI/EOI payloads).
     final jpeg1 = Uint8List.fromList([
-      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+      0xFF,
+      0xD8,
+      0xFF,
+      0xE0,
+      0x00,
+      0x10,
+      0x4A,
+      0x46,
+      0x49,
+      0x46,
+      0x00,
+      0x01,
+      0x01,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0xFF,
+      0xD9,
     ]);
     final jpeg2 = Uint8List.fromList([
-      0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-      0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0xFF, 0xD9,
+      0xFF,
+      0xD8,
+      0xFF,
+      0xE0,
+      0x00,
+      0x10,
+      0x4A,
+      0x46,
+      0x49,
+      0x46,
+      0x00,
+      0x01,
+      0x01,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0xFF,
+      0xDB,
+      0xFF,
+      0xD9,
     ]);
     final html = utf8.encode(
       '<p>见图<img recindex="1"></p><p>再看<img recindex="2"></p>',
@@ -299,7 +341,8 @@ void main() {
   test('decodes HTML entities in large-book fast path', () {
     // Force the >2MB fast path used for large MOBI files.
     final filler = '字' * (2 * 1024 * 1024 + 64);
-    final source = '<p>Hello&nbsp;world &amp; friends &#8220;quote&#8221;</p>'
+    final source =
+        '<p>Hello&nbsp;world &amp; friends &#8220;quote&#8221;</p>'
         '<p>$filler</p>';
     final bytes = utf8.encode(source);
     final book = importer.decode(

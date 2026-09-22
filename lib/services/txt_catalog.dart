@@ -293,7 +293,8 @@ String detectTxtEncoding(Uint8List bytes) {
       bytes[2] == 0xbf) {
     return 'utf-8';
   }
-  final content = bytes.length >= 3 &&
+  final content =
+      bytes.length >= 3 &&
           bytes[0] == 0xef &&
           bytes[1] == 0xbb &&
           bytes[2] == 0xbf
@@ -323,9 +324,7 @@ String decodeTxtWithEncoding(Uint8List bytes, String encoding) {
   }
 }
 
-String _sanitize(String text) => text
-    .replaceAll('﻿', '')
-    .replaceAll('　', ' ');
+String _sanitize(String text) => text.replaceAll('﻿', '').replaceAll('　', ' ');
 
 Object _codecFor(String encoding) => encoding;
 
@@ -399,7 +398,10 @@ List<TxtChapterRef> _mergeEmptyChapters(List<TxtChapterRef> chapters) {
     final start = chapters[i].startOffset;
     final end = target.startOffset + target.byteLength;
     result.add(
-      target.copyWith(startOffset: start, byteLength: end > start ? end - start : 0),
+      target.copyWith(
+        startOffset: start,
+        byteLength: end > start ? end - start : 0,
+      ),
     );
     i = j + 1;
   }

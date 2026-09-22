@@ -56,8 +56,9 @@ abstract final class ReaderMarkup {
     if (_chapterTitle.hasMatch(t)) return true;
     if (RegExp(r'^【[^】]{1,20}】$').hasMatch(t)) return true;
     if (RegExp(r'^\[[^\]]{1,20}\]$').hasMatch(t)) return true;
-    // Short punctuation-free labels still count; anything with sentence
-    // punctuation is prose and must keep first-line indent.
+    // Short punctuation-free labels only. Any sentence punctuation (CJK or
+    // ASCII) means prose — short dialogue like 「好」 still indents unless it
+    // matches the chapter-head regex above.
     return t.length <= 16 &&
         !t.contains('。') &&
         !t.contains('，') &&
@@ -67,21 +68,25 @@ abstract final class ReaderMarkup {
         !t.contains('、') &&
         !t.contains(',') &&
         !t.contains(';') &&
-        !t.contains('…');
+        !t.contains('…') &&
+        !t.contains('.') &&
+        !t.contains('!') &&
+        !t.contains('?');
   }
 
   /// Body prose that must receive the two-space first-line indent even when a
-  /// decoder slapped center/list-ish flags on the whole book layout.
+  /// decoder slapped center flags on the whole book layout.
   static bool looksLikeBodyProse(String plain) {
     final t = plain.trim();
     if (t.isEmpty) return false;
-    if (looksLikeChapterTitle(t)) return false;
+    if (_chapterTitle.hasMatch(t)) return false;
     if (t.contains('。') ||
         t.contains('！') ||
         t.contains('？') ||
         t.contains('…') ||
         t.contains('!') ||
-        t.contains('?')) {
+        t.contains('?') ||
+        t.contains('.')) {
       return true;
     }
     if (t.length >= 40) return true;
@@ -100,8 +105,13 @@ abstract final class ReaderMarkup {
         RegExp(r'^ {2,}').hasMatch(t);
   }
 
-  /// Shared rule for render + pagination: should this paragraph show the
-  /// Chinese body indent `　　`?
+  /// Shared rule for render + pagination.
+  ///
+  /// **Default is indent.** Chinese (and most western) body paragraphs get
+  /// `　　` unless they are clearly not body: real headings, quotes, lists,
+  /// already-indented source, empty/image lines, or centered title labels.
+  /// Do not require “looks like prose” — short dialogue and English lines
+  /// that end with `.` must still indent, or whole books read flush-left.
   static bool shouldIndentFirstLine({
     required String paragraph,
     required String fullParagraph,
@@ -113,12 +123,6 @@ abstract final class ReaderMarkup {
     if (headingLevel != null) return false;
     if (isQuote) return false;
     if (isList) return false;
-    // Center is only trusted for short title-like lines. Whole-book EPUB
-    // layouts often set text-align:center on every block — body prose still
-    // needs indent or the book reads flush-left with no paragraph rhythm.
-    if (isCenter && !looksLikeBodyProse(readerText(fullParagraph))) {
-      return false;
-    }
     if (alreadyHasFirstLineIndent(paragraph) ||
         alreadyHasFirstLineIndent(fullParagraph)) {
       return false;
@@ -127,6 +131,11 @@ abstract final class ReaderMarkup {
     if (plain.isEmpty) return false;
     // Standalone image / marker-only paragraphs stay unindented.
     if (stripAllMarkers(fullParagraph).trim().isEmpty) return false;
+    // Explicit chapter heads stay flush (第N章 / Chapter N / 前言…).
+    if (_chapterTitle.hasMatch(plain)) return false;
+    // Centered short title-like labels stay flush; long centered body
+    // (whole-book text-align:center EPUBs) still indents.
+    if (isCenter && looksLikeChapterTitle(plain)) return false;
     return true;
   }
 
@@ -135,14 +144,15 @@ abstract final class ReaderMarkup {
     required String fullParagraph,
     required bool isTocEntry,
   }) {
-    final match = heading.firstMatch(paragraph) ?? heading.firstMatch(fullParagraph);
+    final match =
+        heading.firstMatch(paragraph) ?? heading.firstMatch(fullParagraph);
     final level = int.tryParse(match?.group(1) ?? '');
     if (level != null) return level;
     if (!isTocEntry) return null;
     final plain = readerText(fullParagraph).trim();
     // TOC target is a heading only when the paragraph itself is title-shaped.
     // Synthetic 第N章 markers that land on body prose must keep indent.
-    if (looksLikeChapterTitle(plain)) return 2;
+    if (_chapterTitle.hasMatch(plain) || looksLikeChapterTitle(plain)) return 2;
     return null;
   }
 

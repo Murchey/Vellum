@@ -129,9 +129,7 @@ class ProgressiveBookPager {
   /// Ensure [paragraphIndex] has an exact page mapping.
   void paginateThrough(int paragraphIndex) {
     var guard = 0;
-    while (!_finished &&
-        _nextParagraph <= paragraphIndex &&
-        guard < 20000) {
+    while (!_finished && _nextParagraph <= paragraphIndex && guard < 20000) {
       paginateSlice(maxParagraphs: 40);
       guard++;
     }
@@ -237,7 +235,8 @@ class ProgressiveBookPager {
     final measureStyle = isHeading
         ? TextStyle(
             fontFamily: _config.fontFamily,
-            fontSize: _config.fontSize * ReaderMarkup.headingFontScale(headingLevel),
+            fontSize:
+                _config.fontSize * ReaderMarkup.headingFontScale(headingLevel),
             height: ReaderMarkup.headingLineHeight(headingLevel),
             fontWeight: FontWeight.w700,
           )

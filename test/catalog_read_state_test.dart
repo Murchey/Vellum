@@ -57,7 +57,7 @@ void main() {
     expect(colorOf('第一章'), readInk);
     expect(colorOf('第二章'), readInk);
     // 第三章 contains current paragraph → accent + not grey.
-    expect(colorOf('第三章'), VellumTheme.accentOf(ctx));
+    expect(colorOf('第三章'), VellumTheme.readerAccentOf(ctx));
     // 第四章 is after current → full ink (unread).
     expect(colorOf('第四章'), themeInk);
 
@@ -66,13 +66,67 @@ void main() {
     expect(find.text('当前章节'), findsOneWidget);
   });
 
-  testWidgets('catalog item height matches Fanqie reader catalog 54dp', (
-    tester,
-  ) async {
+  testWidgets('catalog can flip to descending order', (tester) async {
     const chapters = [
       MapEntry(0, '第一章'),
       MapEntry(50, '第二章'),
+      MapEntry(100, '第三章'),
     ];
+
+    await tester.pumpWidget(
+      CupertinoApp(
+        home: CupertinoPageScaffold(
+          child: SizedBox(
+            height: 400,
+            child: ReaderDirectoryPanel(
+              bookTitle: '排序书',
+              chapters: chapters,
+              bookmarks: const [],
+              notes: const <ReadingNote>[],
+              chapterPageLabels: const {},
+              currentParagraph: 60,
+              readingMode: ReadingMode.scroll,
+              onJumpToParagraph: (_) {},
+              onRemoveBookmark: (_) async {},
+              onRemoveNote: (_) async {},
+              onClose: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('正序'), findsOneWidget);
+    await tester.tap(find.text('正序'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('倒序'), findsOneWidget);
+    // Reverse: 第三章 first, 第一章 last.
+    final titles = tester
+        .widgetList<Text>(
+          find.descendant(
+            of: find.byType(ListView),
+            matching: find.byType(Text),
+          ),
+        )
+        .map((t) => t.data ?? t.textSpan?.toPlainText() ?? '')
+        .where((s) => s.startsWith('第') && s.endsWith('章'))
+        .toList();
+    expect(titles.first, '第三章');
+    expect(titles.last, '第一章');
+    // Current chapter (第二章) still highlighted in reverse order.
+    final ctx = tester.element(find.text('第二章'));
+    expect(
+      tester.widget<Text>(find.text('第二章')).style?.color,
+      VellumTheme.readerAccentOf(ctx),
+    );
+  });
+
+  testWidgets('catalog item height matches Fanqie reader catalog 54dp', (
+    tester,
+  ) async {
+    const chapters = [MapEntry(0, '第一章'), MapEntry(50, '第二章')];
 
     await tester.pumpWidget(
       CupertinoApp(
@@ -100,10 +154,7 @@ void main() {
 
     final item = tester.widget<Container>(
       find
-          .ancestor(
-            of: find.text('第一章'),
-            matching: find.byType(Container),
-          )
+          .ancestor(of: find.text('第一章'), matching: find.byType(Container))
           .first,
     );
     // Layout height comes from ListView.itemExtent = 54.

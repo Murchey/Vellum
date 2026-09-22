@@ -1,21 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
-
-
-
-
-
 import 'package:flutter/services.dart';
-
-
 
 import 'package:file_picker/file_picker.dart';
 
 import 'package:flutter/cupertino.dart';
-
-
-
 
 import 'pages/cover_editor_sheet.dart';
 import 'pages/library_pages.dart';
@@ -36,26 +26,15 @@ import 'services/book_library.dart';
 
 import 'theme/vellum_theme.dart';
 
-
-
 class VellumApp extends StatefulWidget {
-
   const VellumApp({super.key});
 
-
-
   @override
-
   State<VellumApp> createState() => _VellumAppState();
-
 }
 
-
-
 class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
-
   Brightness _brightness =
-
       WidgetsBinding.instance.platformDispatcher.platformBrightness;
 
   Brightness? _manualBrightness;
@@ -70,34 +49,23 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
 
   bool _useFontForContent = false;
 
-
-
   @override
-
   void initState() {
-
     super.initState();
 
     WidgetsBinding.instance.addObserver(this);
 
     _loadFonts();
-
   }
 
-
-
   Future<void> _loadFonts() async {
-
     final fonts = await _library.listFonts();
 
     final prefs = await _library.loadFontPreferences();
 
     if (!mounted) return;
 
-
-
     setState(() {
-
       _installedFonts = fonts;
 
       _activeFontName = prefs.activeFont;
@@ -105,77 +73,50 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
       _useFontForUi = prefs.useForUi;
 
       _useFontForContent = prefs.useForContent;
-
     });
-
-
 
     // 加载激活的字体
 
     if (_activeFontName.isNotEmpty) {
-
       await _activateFont(_activeFontName);
-
     }
-
   }
 
-
-
   Future<void> _activateFont(String name) async {
-
     final bytes = await _library.loadFontByName(name);
 
     if (bytes == null) return;
 
-
-
     final family = 'Font_${name.hashCode.abs()}';
 
     final loader = FontLoader(family)
-
       ..addFont(Future.value(ByteData.sublistView(bytes)));
 
     await loader.load();
 
-
-
     if (!mounted) return;
 
     setState(() {
-
       _activeFontName = name;
 
       VellumTheme.fontFamily = _useFontForUi ? family : 'Georgia';
 
       VellumTheme.contentFontFamily = _useFontForContent ? family : 'Georgia';
-
     });
 
-
-
     await _library.saveFontPreferences(
-
       FontPreferences(
-
         useForUi: _useFontForUi,
 
         useForContent: _useFontForContent,
 
         activeFont: name,
-
       ),
-
     );
-
   }
 
-
-
   Future<void> _importFonts() async {
-
     final result = await FilePicker.platform.pickFiles(
-
       type: FileType.custom,
 
       allowedExtensions: ['ttf'],
@@ -183,37 +124,25 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
       withData: true,
 
       allowMultiple: true,
-
     );
 
     if (result == null) return;
 
-
-
     for (final file in result.files) {
-
       if (file.bytes == null) continue;
 
       final name = file.name.replaceAll('.ttf', '');
 
       await _library.saveFontWithName(name, Uint8List.fromList(file.bytes!));
-
     }
 
-
-
     await _loadFonts();
-
   }
 
-
-
   Future<void> _deleteFont(String name) async {
-
     await _library.deleteFontByName(name);
 
     if (_activeFontName == name) {
-
       _activeFontName = '';
 
       VellumTheme.fontFamily = 'Georgia';
@@ -221,33 +150,21 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
       VellumTheme.contentFontFamily = 'Georgia';
 
       await _library.saveFontPreferences(const FontPreferences());
-
     }
 
     await _loadFonts();
-
   }
 
-
-
   Future<void> _setFontUsage({
-
     required bool useForUi,
 
     required bool useForContent,
-
   }) async {
-
     final family = _activeFontName.isNotEmpty
-
         ? 'Font_${_activeFontName.hashCode.abs()}'
-
         : 'Georgia';
 
-
-
     setState(() {
-
       _useFontForUi = useForUi;
 
       _useFontForContent = useForContent;
@@ -255,91 +172,63 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
       VellumTheme.fontFamily = useForUi ? family : 'Georgia';
 
       VellumTheme.contentFontFamily = useForContent ? family : 'Georgia';
-
     });
 
-
-
     await _library.saveFontPreferences(
-
       FontPreferences(
-
         useForUi: useForUi,
 
         useForContent: useForContent,
 
         activeFont: _activeFontName,
-
       ),
-
     );
-
   }
 
-
-
   @override
-
   void didChangePlatformBrightness() {
-
     setState(() {
-
       _brightness =
-
           WidgetsBinding.instance.platformDispatcher.platformBrightness;
-
     });
-
   }
 
-
-
   @override
-
   void dispose() {
-
     WidgetsBinding.instance.removeObserver(this);
 
     super.dispose();
-
   }
 
-
-
   @override
-
   Widget build(BuildContext context) => CupertinoApp(
-
     debugShowCheckedModeBanner: false,
 
     title: 'Vellum',
 
     theme: VellumTheme.forBrightness(
-
       _manualBrightness ?? _brightness,
 
       fontFamily: _useFontForUi && _activeFontName.isNotEmpty
-
           ? 'Font_${_activeFontName.hashCode.abs()}'
-
           : 'Georgia',
-
     ),
 
     home: LibraryShell(
-
-      onToggleTheme: () => setState(() {
-
-        final current = _manualBrightness ?? _brightness;
-
-        _manualBrightness = current == Brightness.dark
-
-            ? Brightness.light
-
-            : Brightness.dark;
-
+      themeModeLabel: _manualBrightness == null
+          ? '跟随系统'
+          : (_manualBrightness == Brightness.dark ? '深色' : '浅色'),
+      onCycleTheme: () => setState(() {
+        if (_manualBrightness == null) {
+          _manualBrightness = _brightness == Brightness.dark
+              ? Brightness.light
+              : Brightness.dark;
+        } else if (_manualBrightness == Brightness.light) {
+          _manualBrightness = Brightness.dark;
+        } else {
+          _manualBrightness = null;
+        }
       }),
-
       isDark: (_manualBrightness ?? _brightness) == Brightness.dark,
 
       installedFonts: _installedFonts,
@@ -357,18 +246,14 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
       onDeleteFont: _deleteFont,
 
       onFontUsageChanged: _setFontUsage,
-
     ),
-
   );
-
 }
 
-
-
 class LibraryShell extends StatefulWidget {
+  final VoidCallback onCycleTheme;
 
-  final VoidCallback onToggleTheme;
+  final String themeModeLabel;
 
   final bool isDark;
 
@@ -387,18 +272,15 @@ class LibraryShell extends StatefulWidget {
   final Future<void> Function(String) onDeleteFont;
 
   final Future<void> Function({
-
     required bool useForUi,
 
     required bool useForContent,
-
   })
-
   onFontUsageChanged;
 
   const LibraryShell({
-
-    required this.onToggleTheme,
+    required this.onCycleTheme,
+    required this.themeModeLabel,
 
     required this.isDark,
 
@@ -419,19 +301,13 @@ class LibraryShell extends StatefulWidget {
     required this.onFontUsageChanged,
 
     super.key,
-
   });
 
   @override
-
   State<LibraryShell> createState() => _LibraryShellState();
-
 }
 
-
-
 class _LibraryShellState extends State<LibraryShell> {
-
   final _books = <ImportedBook>[];
 
   final _folders = <LibraryFolder>[];
@@ -447,18 +323,13 @@ class _LibraryShellState extends State<LibraryShell> {
 
   String _importStage = '';
 
-
-
   @override
-
   void initState() {
-
     super.initState();
 
     _loadLibrary();
 
     _scheduleUpdateCheck();
-
   }
 
   /// Checks the release feed once per launch, a moment after the shelf settles.
@@ -479,10 +350,7 @@ class _LibraryShellState extends State<LibraryShell> {
     }
   }
 
-
-
   Future<void> _loadLibrary() async {
-
     final books = await _library.load();
     final folders = await _library.loadFolders();
 
@@ -494,8 +362,8 @@ class _LibraryShellState extends State<LibraryShell> {
         final state = await _library.loadReadingState(book);
         final total = book.paragraphCount;
         if (total > 1) {
-          progressById[book.storageId] =
-              (state.paragraphIndex / (total - 1)).clamp(0.0, 1.0);
+          progressById[book.storageId] = (state.paragraphIndex / (total - 1))
+              .clamp(0.0, 1.0);
         }
         if (state.paragraphIndex > 0 || state.page > 0 || state.position > 0) {
           continueState = state;
@@ -507,11 +375,8 @@ class _LibraryShellState extends State<LibraryShell> {
     if (!mounted) return;
 
     setState(() {
-
       _books
-
         ..clear()
-
         ..addAll(books);
 
       _folders
@@ -522,37 +387,25 @@ class _LibraryShellState extends State<LibraryShell> {
       _progressById
         ..clear()
         ..addAll(progressById);
-
     });
-
   }
-
-
 
   void _setImportStage(String stage) {
-
     if (mounted) setState(() => _importStage = stage);
-
   }
 
-
-
   Future<void> _importBook() async {
-
     if (_importing) return;
 
     const importer = BookImportService();
 
     setState(() {
-
       _importing = true;
 
       _importStage = '正在打开文件选择器…';
-
     });
 
     try {
-
       final book = await importer.pickAndDecode(onStage: _setImportStage);
 
       if (book == null) return;
@@ -564,85 +417,51 @@ class _LibraryShellState extends State<LibraryShell> {
       if (!mounted) return;
 
       setState(() {
-
         _books
-
           ..clear()
-
           ..addAll(updated);
-
       });
 
       await _openBook(book);
-
     } on BookImportException catch (error) {
-
       if (mounted) await _showError(error.message);
-
     } catch (error) {
-
       if (mounted) await _showError('导入失败：');
-
     } finally {
-
       if (mounted) {
-
         setState(() {
-
           _importing = false;
 
           _importStage = '';
-
         });
-
       }
-
     }
-
   }
 
-
-
   Future<void> _showError(String message, {String title = '无法导入'}) =>
-
       showCupertinoDialog<void>(
-
         context: context,
 
         builder: (context) => CupertinoAlertDialog(
-
           title: Text(title),
 
           content: Text(message),
 
           actions: [
-
             CupertinoDialogAction(
-
               onPressed: () => Navigator.pop(context),
 
               child: const Text('好'),
-
             ),
-
           ],
-
         ),
-
       );
 
-
-
   Future<void> _activateReaderFont(String name) async {
-
     await widget.onActivateFont(name);
-
   }
 
-
-
   Future<void> _openBook(ImportedBook book) async {
-
     final full = await _library.loadBookContent(book);
 
     final state = await _library.loadReadingState(full);
@@ -650,11 +469,8 @@ class _LibraryShellState extends State<LibraryShell> {
     if (!mounted) return;
 
     await Navigator.of(context).push(
-
       CupertinoPageRoute(
-
         builder: (_) => ReaderPage(
-
           book: full,
 
           initialState: state,
@@ -667,12 +483,9 @@ class _LibraryShellState extends State<LibraryShell> {
 
           onActivateFont: _activateReaderFont,
 
-          onToggleUiTheme: widget.onToggleTheme,
-
+          onToggleUiTheme: widget.onCycleTheme,
         ),
-
       ),
-
     );
 
     if (!mounted) return;
@@ -680,7 +493,6 @@ class _LibraryShellState extends State<LibraryShell> {
     final latest = await _library.loadReadingState(full);
 
     if (mounted) setState(() => _continueState = latest);
-
   }
 
   Future<void> _editBookCover(ImportedBook book) async {
@@ -688,31 +500,34 @@ class _LibraryShellState extends State<LibraryShell> {
       context: context,
       builder: (ctx) => CoverEditorSheet(
         book: book,
-        onSave: ({
-          Uint8List? coverBytes,
-          String? coverText,
-          bool clearCoverImage = false,
-          bool clearCoverText = false,
-        }) async {
-          await _library.updateBookCover(
-            book,
-            coverBytes: coverBytes,
-            coverText: coverText,
-            clearCoverImage: clearCoverImage,
-            clearCoverText: clearCoverText,
-          );
-          if (!mounted) return;
-          final updated = book.copyWith(
-            coverBytes: coverBytes,
-            coverText: coverText,
-            clearCoverImage: clearCoverImage,
-            clearCoverText: clearCoverText,
-          );
-          setState(() {
-            final i = _books.indexWhere((b) => b.storageId == book.storageId);
-            if (i >= 0) _books[i] = updated;
-          });
-        },
+        onSave:
+            ({
+              Uint8List? coverBytes,
+              String? coverText,
+              bool clearCoverImage = false,
+              bool clearCoverText = false,
+            }) async {
+              await _library.updateBookCover(
+                book,
+                coverBytes: coverBytes,
+                coverText: coverText,
+                clearCoverImage: clearCoverImage,
+                clearCoverText: clearCoverText,
+              );
+              if (!mounted) return;
+              final updated = book.copyWith(
+                coverBytes: coverBytes,
+                coverText: coverText,
+                clearCoverImage: clearCoverImage,
+                clearCoverText: clearCoverText,
+              );
+              setState(() {
+                final i = _books.indexWhere(
+                  (b) => b.storageId == book.storageId,
+                );
+                if (i >= 0) _books[i] = updated;
+              });
+            },
       ),
     );
   }
@@ -760,41 +575,30 @@ class _LibraryShellState extends State<LibraryShell> {
   }
 
   Future<void> _deleteBook(ImportedBook book) async {
-
     final confirmed = await showCupertinoDialog<bool>(
-
       context: context,
 
       builder: (context) => CupertinoAlertDialog(
-
         title: const Text('删除这本书？'),
 
         content: Text('《${book.title}》和它的阅读记录将被删除，此操作不可恢复。'),
 
         actions: [
-
           CupertinoDialogAction(
-
             onPressed: () => Navigator.pop(context, false),
 
             child: const Text('取消'),
-
           ),
 
           CupertinoDialogAction(
-
             isDestructiveAction: true,
 
             onPressed: () => Navigator.pop(context, true),
 
             child: const Text('删除'),
-
           ),
-
         ],
-
       ),
-
     );
 
     if (confirmed != true) return;
@@ -806,23 +610,14 @@ class _LibraryShellState extends State<LibraryShell> {
     await _library.deleteBook(book);
 
     await _library.deleteReadingState(book);
-
   }
 
-
-
   @override
-
   Widget build(BuildContext context) {
-
     return Stack(
-
       children: [
-
         CupertinoTabScaffold(
-
           tabBar: CupertinoTabBar(
-
             currentIndex: _tab,
 
             onTap: (value) => setState(() => _tab = value),
@@ -835,52 +630,38 @@ class _LibraryShellState extends State<LibraryShell> {
 
             border: Border(top: BorderSide(color: VellumTheme.lineOf(context))),
 
-            backgroundColor: VellumTheme.readerChromeOf(context),
+            backgroundColor: VellumTheme.shellOf(context),
 
             items: const [
-
               BottomNavigationBarItem(
-
                 icon: Icon(CupertinoIcons.book),
 
                 label: '阅读',
-
               ),
 
               BottomNavigationBarItem(
-
                 icon: Icon(CupertinoIcons.square_stack_3d_up),
 
                 label: '书库',
-
               ),
 
               BottomNavigationBarItem(
-
                 icon: Icon(CupertinoIcons.pencil),
 
                 label: '写作',
-
               ),
 
               BottomNavigationBarItem(
-
                 icon: Icon(CupertinoIcons.gear),
 
                 label: '设置',
-
               ),
-
             ],
-
           ),
 
           tabBuilder: (_, index) {
-
             if (index == 0) {
-
               return HomePage(
-
                 books: _books,
 
                 continueState: _continueState,
@@ -888,15 +669,11 @@ class _LibraryShellState extends State<LibraryShell> {
                 onOpen: _openBook,
 
                 onImport: _importBook,
-
               );
-
             }
 
             if (index == 1) {
-
               return LibraryPage(
-
                 books: _books,
 
                 folders: _folders,
@@ -918,16 +695,14 @@ class _LibraryShellState extends State<LibraryShell> {
                 onDeleteFolder: _deleteFolder,
 
                 onRenameFolder: _renameFolder,
-
               );
-
             }
 
             if (index == 2) return const WritingPage();
 
             return SettingsPage(
-
-              onToggleTheme: widget.onToggleTheme,
+              onCycleTheme: widget.onCycleTheme,
+              themeModeLabel: widget.themeModeLabel,
 
               isDark: widget.isDark,
 
@@ -950,130 +725,91 @@ class _LibraryShellState extends State<LibraryShell> {
               storageUsage: _library.storageUsage,
 
               onClearBooks: () async {
-
                 await _library.clearBooks();
 
                 await _library.clearReadingStates();
 
                 if (mounted) setState(() => _books.clear());
-
               },
 
               onClearReadingStates: _library.clearReadingStates,
-
             );
-
           },
-
         ),
 
         if (_importing)
-
           Positioned.fill(
-
             child: ColoredBox(
-
               color: const Color(0x66000000),
 
               child: Center(
-
                 child: Container(
-
                   width: 280,
 
                   padding: const EdgeInsets.all(24),
 
                   decoration: BoxDecoration(
-
                     color: VellumTheme.cardOf(context),
 
                     borderRadius: BorderRadius.circular(20),
 
                     border: Border.all(color: VellumTheme.lineOf(context)),
-
                   ),
 
                   child: Column(
-
                     mainAxisSize: MainAxisSize.min,
 
                     children: [
-
                       const CupertinoActivityIndicator(radius: 14),
 
                       const SizedBox(height: 18),
 
                       Text(
-
                         '正在导入电子书',
 
                         style: TextStyle(
-
                           color: VellumTheme.inkOf(context),
 
                           fontSize: 17,
 
                           fontWeight: FontWeight.w600,
-
                         ),
-
                       ),
 
                       const SizedBox(height: 8),
 
                       Text(
-
                         _importStage,
 
                         textAlign: TextAlign.center,
 
                         style: TextStyle(
-
                           color: VellumTheme.mutedOf(context),
 
                           fontSize: 14,
-
                         ),
-
                       ),
 
                       const SizedBox(height: 10),
 
                       Text(
-
                         '大型 MOBI 需要一点时间，请不要关闭应用。',
 
                         textAlign: TextAlign.center,
 
                         style: TextStyle(
-
                           color: VellumTheme.mutedOf(context),
 
                           fontSize: 12,
-
                         ),
-
                       ),
-
                     ],
-
                   ),
-
                 ),
-
               ),
-
             ),
-
           ),
-
       ],
-
     );
-
   }
-
 }
-
-
-

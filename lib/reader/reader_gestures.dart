@@ -22,9 +22,11 @@ abstract final class ReaderGestures {
   static const double scrollCenterBottom = 0.65;
 
   static bool isCenterTap(Offset position, double width, double height) {
-    final inX = position.dx >= width * leftZoneEnd &&
+    final inX =
+        position.dx >= width * leftZoneEnd &&
         position.dx <= width * rightZoneStart;
-    final inY = position.dy >= height * scrollCenterTop &&
+    final inY =
+        position.dy >= height * scrollCenterTop &&
         position.dy <= height * scrollCenterBottom;
     return inX && inY;
   }

@@ -57,10 +57,7 @@ class _WritingPageState extends State<WritingPage> {
     if (!mounted) return;
     await Navigator.of(context).push<void>(
       CupertinoPageRoute(
-        builder: (_) => WritingEditorPage(
-          document: doc,
-          onChanged: _reload,
-        ),
+        builder: (_) => WritingEditorPage(document: doc, onChanged: _reload),
       ),
     );
     await _reload();
@@ -69,10 +66,7 @@ class _WritingPageState extends State<WritingPage> {
   Future<void> _openDocument(WritingDocument doc) async {
     await Navigator.of(context).push<void>(
       CupertinoPageRoute(
-        builder: (_) => WritingEditorPage(
-          document: doc,
-          onChanged: _reload,
-        ),
+        builder: (_) => WritingEditorPage(document: doc, onChanged: _reload),
       ),
     );
     await _reload();
@@ -162,6 +156,8 @@ class _WritingPageState extends State<WritingPage> {
 
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
         middle: const Text('写作'),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -170,17 +166,17 @@ class _WritingPageState extends State<WritingPage> {
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(40, 40),
               onPressed: _importDocument,
-              child: Icon(
-                CupertinoIcons.folder_open,
-                size: 22,
-                color: accent,
-              ),
+              child: Icon(CupertinoIcons.folder_open, size: 22, color: accent),
             ),
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               minimumSize: const Size(40, 40),
               onPressed: _createDocument,
-              child: Icon(CupertinoIcons.square_pencil, size: 22, color: accent),
+              child: Icon(
+                CupertinoIcons.square_pencil,
+                size: 22,
+                color: accent,
+              ),
             ),
           ],
         ),
@@ -250,7 +246,11 @@ class _WritingPageState extends State<WritingPage> {
                             doc.preview,
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: muted, fontSize: 13, height: 1.4),
+                            style: TextStyle(
+                              color: muted,
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -303,7 +303,10 @@ class _EmptyWritingState extends StatelessWidget {
               style: TextStyle(color: muted, fontSize: 14, height: 1.45),
             ),
             const SizedBox(height: 20),
-            CupertinoButton.filled(onPressed: onCreate, child: const Text('新建文稿')),
+            CupertinoButton.filled(
+              onPressed: onCreate,
+              child: const Text('新建文稿'),
+            ),
           ],
         ),
       ),
@@ -313,11 +316,7 @@ class _EmptyWritingState extends StatelessWidget {
 
 /// Editor for one writing document. Auto-saves drafts; can export .md/.txt.
 class WritingEditorPage extends StatefulWidget {
-  const WritingEditorPage({
-    required this.document,
-    this.onChanged,
-    super.key,
-  });
+  const WritingEditorPage({required this.document, this.onChanged, super.key});
 
   final WritingDocument document;
   final VoidCallback? onChanged;
@@ -411,9 +410,11 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
       );
       if (path == null || path.isEmpty || !mounted) return;
       if (!useSaf) {
-        final file = File(path.endsWith('.${_format.extension}')
-            ? path
-            : '$path.${_format.extension}');
+        final file = File(
+          path.endsWith('.${_format.extension}')
+              ? path
+              : '$path.${_format.extension}',
+        );
         await file.writeAsString(text, encoding: utf8, flush: true);
         if (!mounted) return;
         _showToast('已导出到 ${file.path}');
@@ -519,6 +520,8 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
           },
           child: const Text('完成'),
         ),
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
         middle: Text(_format.label),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -634,7 +637,10 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
                   fontSize: 20,
                   fontWeight: FontWeight.w600,
                 ),
-                placeholderStyle: TextStyle(color: muted, fontWeight: FontWeight.w400),
+                placeholderStyle: TextStyle(
+                  color: muted,
+                  fontWeight: FontWeight.w400,
+                ),
                 decoration: const BoxDecoration(),
                 padding: const EdgeInsets.symmetric(vertical: 10),
               ),
@@ -660,7 +666,9 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
               decoration: BoxDecoration(
-                border: Border(top: BorderSide(color: VellumTheme.lineOf(context))),
+                border: Border(
+                  top: BorderSide(color: VellumTheme.lineOf(context)),
+                ),
               ),
               child: Text(
                 '${previewDoc.characterCount} 字 · ${previewDoc.wordCount} 词'

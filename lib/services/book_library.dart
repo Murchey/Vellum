@@ -150,7 +150,8 @@ ImportedBook _decodeIndexEntry(Map<String, dynamic> data) => ImportedBook(
 );
 
 ImportedBook _decodeBookContent(Map<String, dynamic> data) {
-  final paragraphs = (data['paragraphs'] as List<dynamic>? ?? []).cast<String>();
+  final paragraphs = (data['paragraphs'] as List<dynamic>? ?? [])
+      .cast<String>();
   return ImportedBook(
     id: data['id'] as String?,
     title: data['title'] as String,
@@ -285,7 +286,8 @@ class BookLibrary {
     final file = await _bookContentFile(book.storageId);
     if (await file.exists()) {
       try {
-        final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+        final data =
+            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
         final full = _decodeBookContent(data);
         // Content files do not carry shelf cover; keep the index shell's cover.
         return full.copyWith(
@@ -382,10 +384,7 @@ class BookLibrary {
     await saveIndex(next);
   }
 
-  Future<void> setBookFolder(
-    ImportedBook book,
-    String? folderId,
-  ) async {
+  Future<void> setBookFolder(ImportedBook book, String? folderId) async {
     final updated = folderId == null
         ? book.copyWith(clearFolder: true)
         : book.copyWith(folderId: folderId);
@@ -403,8 +402,7 @@ class BookLibrary {
   Future<void> _writeFolders(List<LibraryFolder> folders) async {
     await (await _foldersFile()).writeAsString(
       jsonEncode([
-        for (final folder in folders)
-          {'id': folder.id, 'name': folder.name},
+        for (final folder in folders) {'id': folder.id, 'name': folder.name},
       ]),
       flush: true,
     );
@@ -423,7 +421,10 @@ class BookLibrary {
   }
 
   Future<void> saveUpdateRepository(String repository) async {
-    await (await _updateRepoFile()).writeAsString(repository.trim(), flush: true);
+    await (await _updateRepoFile()).writeAsString(
+      repository.trim(),
+      flush: true,
+    );
   }
 
   /// Whether entering the app should check for updates. On unless turned off.
@@ -482,10 +483,7 @@ class BookLibrary {
       final catalog = book.catalog;
       if (catalog != null) {
         final catFile = await _bookCatalogFile(book.storageId);
-        await catFile.writeAsString(
-          jsonEncode(catalog.toJson()),
-          flush: true,
-        );
+        await catFile.writeAsString(jsonEncode(catalog.toJson()), flush: true);
       }
       return;
     }
@@ -585,7 +583,8 @@ class BookLibrary {
     Map<String, dynamic> states = {};
     if (await file.exists()) {
       try {
-        states = (jsonDecode(await file.readAsString()) as Map<String, dynamic>);
+        states =
+            (jsonDecode(await file.readAsString()) as Map<String, dynamic>);
       } catch (_) {
         states = {};
       }
@@ -606,7 +605,14 @@ class BookLibrary {
       final file = await _prefsFile();
       if (!await file.exists()) return const ReaderPreferences();
       final raw = jsonDecode(await file.readAsString());
-      if (raw is Map<String, dynamic>) return ReaderPreferences.fromJson(raw);
+      if (raw is Map<String, dynamic>) {
+        final prefs = ReaderPreferences.fromJson(raw);
+        final aligned = alignedReaderPreferences(prefs);
+        if (identical(aligned, prefs)) return prefs;
+        // Persist immediately so the scale is applied once, not per launch.
+        await saveReaderPreferences(aligned);
+        return aligned;
+      }
     } catch (_) {}
     return const ReaderPreferences();
   }
@@ -620,7 +626,8 @@ class BookLibrary {
     final file = await _stateFile();
     if (!await file.exists()) return;
     try {
-      final states = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final states =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       states.remove(_key(book));
       await file.writeAsString(jsonEncode(states));
     } catch (_) {}
@@ -643,7 +650,9 @@ class BookLibrary {
     final fontFile = await fonts.fontFile();
     return StorageUsage(
       libraryBytes: libraryBytes,
-      readingStateBytes: await stateFile.exists() ? await stateFile.length() : 0,
+      readingStateBytes: await stateFile.exists()
+          ? await stateFile.length()
+          : 0,
       fontBytes: await fontFile.exists() ? await fontFile.length() : 0,
     );
   }
@@ -707,17 +716,14 @@ class BookLibrary {
     if (await file.exists()) await file.delete();
   }
 
-  Future<FontPreferences> loadFontPreferences() =>
-      fonts.loadFontPreferences();
+  Future<FontPreferences> loadFontPreferences() => fonts.loadFontPreferences();
   Future<void> saveFontPreferences(FontPreferences preferences) =>
       fonts.saveFontPreferences(preferences);
   Future<List<InstalledFont>> listFonts() => fonts.listFonts();
   Future<void> saveFontWithName(String name, Uint8List bytes) =>
       fonts.saveFontWithName(name, bytes);
-  Future<Uint8List?> loadFontByName(String name) =>
-      fonts.loadFontByName(name);
-  Future<void> deleteFontByName(String name) =>
-      fonts.deleteFontByName(name);
+  Future<Uint8List?> loadFontByName(String name) => fonts.loadFontByName(name);
+  Future<void> deleteFontByName(String name) => fonts.deleteFontByName(name);
   Future<void> clearFont() => fonts.clearFont();
 
   String _key(ImportedBook book) => '${book.format.name}:${book.title}';
@@ -760,22 +766,16 @@ class BookLibrary {
 
   Future<File> _foldersFile() async {
     final dir = await getApplicationDocumentsDirectory();
-    return File(
-      '${dir.path}${Platform.pathSeparator}vellum_folders.json',
-    );
+    return File('${dir.path}${Platform.pathSeparator}vellum_folders.json');
   }
 
   Future<File> _updateRepoFile() async {
     final dir = await getApplicationDocumentsDirectory();
-    return File(
-      '${dir.path}${Platform.pathSeparator}vellum_update_repo.txt',
-    );
+    return File('${dir.path}${Platform.pathSeparator}vellum_update_repo.txt');
   }
 
   Future<File> _autoUpdateFile() async {
     final dir = await getApplicationDocumentsDirectory();
-    return File(
-      '${dir.path}${Platform.pathSeparator}vellum_update_auto.txt',
-    );
+    return File('${dir.path}${Platform.pathSeparator}vellum_update_auto.txt');
   }
 }

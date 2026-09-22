@@ -8,11 +8,7 @@ import '../theme/vellum_theme.dart';
 
 /// Long-press sheet: edit shelf cover with an image or custom text.
 class CoverEditorSheet extends StatefulWidget {
-  const CoverEditorSheet({
-    required this.book,
-    required this.onSave,
-    super.key,
-  });
+  const CoverEditorSheet({required this.book, required this.onSave, super.key});
 
   final ImportedBook book;
   final Future<void> Function({
@@ -124,9 +120,7 @@ class _CoverEditorSheetState extends State<CoverEditorSheet> {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: VellumTheme.lineOf(context),
-                        ),
+                        border: Border.all(color: VellumTheme.lineOf(context)),
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(9),

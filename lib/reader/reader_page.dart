@@ -78,6 +78,8 @@ class _ReaderPageState extends State<ReaderPage>
   DateTime? _readerPointerDownAt;
   Offset? _readerPointerDownPosition;
   bool _pointerLooksLikeSelection = false;
+  bool _bookmarkPullInProgress = false;
+  int _pageBeforePointerDown = 0;
   Timer? _selectionHoldTimer;
   final Map<int, GlobalKey> _paragraphKeys = {};
   bool _scrollPositionRestored = false;
@@ -103,12 +105,6 @@ class _ReaderPageState extends State<ReaderPage>
   late final Set<int> _tocParagraphs = {
     for (final entry in widget.book.tocEntries) entry.paragraphIndex,
   };
-
-  /// Character count of the whole book, used for the remaining-time estimate.
-  late final int _totalChars = _countChars();
-
-  /// Order-of-magnitude reading pace for Chinese prose (characters / minute).
-  static const int _charsPerMinute = 500;
 
   final _statsService = const ReadingStatsService();
   final _sessionSeconds = ValueNotifier<int>(0);
@@ -140,16 +136,19 @@ class _ReaderPageState extends State<ReaderPage>
     _eyeCare = ReaderEyeCare.fromStorage(widget.initialState.eyeCare);
     _keepScreenOn = widget.initialState.keepScreenOn;
     _volumeKeys = widget.initialState.volumeKeys;
-    _pager = ProgressiveBookPager(widget.book, const PageLayoutConfig(
-      fontSize: 19,
-      lineSpacing: ReaderLineSpacing.comfortable,
-      fontFamily: 'Georgia',
-      fontWeight: ReaderFontWeight.regular,
-      availableHeight: 600,
-      contentWidth: 360,
-      screenHeight: 800,
-      title: '',
-    ));
+    _pager = ProgressiveBookPager(
+      widget.book,
+      const PageLayoutConfig(
+        fontSize: 19,
+        lineSpacing: ReaderLineSpacing.standard,
+        fontFamily: 'Georgia',
+        fontWeight: ReaderFontWeight.regular,
+        availableHeight: 600,
+        contentWidth: 360,
+        screenHeight: 800,
+        title: '',
+      ),
+    );
     _coverAnim = AnimationController(
       vsync: this,
       // Fanqie's page-turn animation is short enough to feel immediate; a
@@ -160,12 +159,15 @@ class _ReaderPageState extends State<ReaderPage>
       ..addListener(() {
         _scheduleSave();
         if (_readingMode != ReadingMode.scroll || !mounted) return;
-        final estimated = (_scrollController.offset /
-                (_fontSize * (_lineSpacing.height + 1.3)))
-            .floor();
+        final estimated =
+            (_scrollController.offset /
+                    (_fontSize * (_lineSpacing.height + 1.3)))
+                .floor();
         final clamped = estimated.clamp(
           0,
-          widget.book.paragraphs.isEmpty ? 0 : widget.book.paragraphs.length - 1,
+          widget.book.paragraphs.isEmpty
+              ? 0
+              : widget.book.paragraphs.length - 1,
         );
         if (clamped != _currentParagraph) {
           setState(() => _currentParagraph = clamped);
@@ -217,11 +219,6 @@ class _ReaderPageState extends State<ReaderPage>
       (_scrollController.offset + delta).clamp(0.0, position.maxScrollExtent),
     );
     _scheduleSave();
-  }
-
-  int _countChars() {
-    // TXT seek-mode books expose an O(1) catalog total; others iterate once.
-    return widget.book.totalCharCount;
   }
 
   Future<void> _loadNotes() async {
@@ -285,8 +282,9 @@ class _ReaderPageState extends State<ReaderPage>
   Future<void> _loadTodayReading() async {
     if (Platform.environment['FLUTTER_TEST'] == 'true') return;
     try {
-      final stats = await _statsService.load()
-          .timeout(const Duration(seconds: 2));
+      final stats = await _statsService.load().timeout(
+        const Duration(seconds: 2),
+      );
       if (mounted) _todaySeconds.value = stats.todaySeconds;
     } catch (_) {}
   }
@@ -344,19 +342,21 @@ class _ReaderPageState extends State<ReaderPage>
       }
       if (requestedOffset > 0) {
         _scrollController.jumpTo(requestedOffset.clamp(0.0, maxExtent));
-        _currentParagraph = (requestedOffset /
-                (_fontSize * (_lineSpacing.height + 1.3)))
-            .floor()
-            .clamp(
-              0,
-              widget.book.paragraphs.isEmpty
-                  ? 0
-                  : widget.book.paragraphs.length - 1,
-            );
+        _currentParagraph =
+            (requestedOffset / (_fontSize * (_lineSpacing.height + 1.3)))
+                .floor()
+                .clamp(
+                  0,
+                  widget.book.paragraphs.isEmpty
+                      ? 0
+                      : widget.book.paragraphs.length - 1,
+                );
       } else {
         final paragraph = widget.initialState.paragraphIndex.clamp(
           0,
-          widget.book.paragraphs.isEmpty ? 0 : widget.book.paragraphs.length - 1,
+          widget.book.paragraphs.isEmpty
+              ? 0
+              : widget.book.paragraphs.length - 1,
         );
         final estimated =
             paragraph * (_fontSize * (_lineSpacing.height + 22 / _fontSize));
@@ -521,25 +521,36 @@ class _ReaderPageState extends State<ReaderPage>
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
   }
-  /// Fixed bottom padding for the reading surface.
-  /// Controls are a floating overlay and must not change this value, so
-  /// opening the menu never reflows the page or re-paginates the book.
-  /// Tall enough for the progress/battery status line without clipping text.
-  static const double _readerBottomInset = 64;
+
+  /// Reading-surface insets, matched to the reference reader's page metrics
+  /// (左右 24dp，底部预留给状态胶囊): controls are a floating overlay and must
+  /// not change these, so opening the menu never reflows or re-paginates.
+  static const double _readerSideInset = 24;
+  static const double _readerTopInset = 24;
+
+  /// Fanqie page foot is tight so body text fills the column.
+  static const double _readerBottomInset = 18;
 
   /// Viewport height for pagination. Shares the same fixed bottom reservation
   /// as list/page padding so layout stays identical with controls open or not.
   double _pageAvailableHeight(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final view = MediaQuery.viewPaddingOf(context);
-    // Must match PageView/padding: top 20 + bottom inset, inside SafeArea.
+    // Must match PageView/list padding, inside SafeArea.
     // Pagination subtracts an extra measurement slack internally.
-    return size.height - view.top - view.bottom - 20 - _readerBottomInset;
+    return size.height -
+        view.top -
+        view.bottom -
+        _readerTopInset -
+        _readerBottomInset;
   }
 
   double _pageContentWidth(BuildContext context) {
     final media = MediaQuery.of(context);
-    return media.size.width - media.padding.left - media.padding.right - 56;
+    return media.size.width -
+        media.padding.left -
+        media.padding.right -
+        _readerSideInset * 2;
   }
 
   PageLayoutConfig _pageLayoutConfig(BuildContext context) {
@@ -723,9 +734,7 @@ class _ReaderPageState extends State<ReaderPage>
     final labels = <int, String>{};
     for (final entry in _chapters) {
       final ref = _pager.pageRefForParagraph(entry.key);
-      labels[entry.key] = ref.exact
-          ? '第 ${ref.page1} 页'
-          : '约第 ${ref.page1} 页';
+      labels[entry.key] = ref.exact ? '第 ${ref.page1} 页' : '约第 ${ref.page1} 页';
     }
     return labels;
   }
@@ -749,53 +758,26 @@ class _ReaderPageState extends State<ReaderPage>
     return found;
   }
 
-  /// `第一章 夜雨 · 本章 38%` — the footer's chapter context line.
+  /// Chapter title only — top-left / menu bar (Fanqie running head).
   String get _chapterLabel {
     if (_chapters.isEmpty) return '';
     final index = _chapterIndexFor(_activeParagraph);
-    if (index < 0) return '开篇 · 第 ${_activeParagraph + 1} 段';
-    final entry = _chapters[index];
-    final total = widget.book.paragraphs.length;
-    final next = index + 1 < _chapters.length
-        ? _chapters[index + 1].key
-        : total;
-    final span = (next - entry.key).clamp(1, total);
-    final read = (_activeParagraph - entry.key + 1).clamp(0, span);
-    final percent = (read / span * 100).round().clamp(0, 100);
-    return '${entry.value} · 本章 $percent%';
+    if (index < 0) return '开篇';
+    return _chapters[index].value;
   }
 
-  /// Rough time left in the book, from the reader's position and a fixed pace.
-  String get _remainingLabel {
-    final total = widget.book.paragraphs.length;
-    if (total == 0 || _totalChars == 0) return '';
-    final read = (_activeParagraph + 1).clamp(0, total);
-    final remaining = total - read;
-    if (remaining <= 0) return '已读完';
-    final minutes = (_totalChars * remaining / total / _charsPerMinute).ceil();
-    if (minutes < 1) return '剩余不足 1 分钟';
-    if (minutes < 60) return '剩余约 $minutes 分钟';
-    final hours = minutes ~/ 60;
-    final rest = minutes % 60;
-    return '剩余约 $hours 小时 $rest 分钟';
-  }
+  /// Fanqie bottom indicator: page number only (no percent / paragraph).
   String get _pageProgress {
     if (_readingMode == ReadingMode.page) {
       final total = _pager.estimatedTotalPageCount;
       final current = (_currentPage + 1).clamp(1, total);
-      return _pager.fullyPaginated
-          ? '$current / $total'
-          : '$current / ~$total';
+      return _pager.fullyPaginated ? '$current / $total' : '$current / ~$total';
     }
     final percent = (_progress * 100).clamp(0, 100).round();
-    final paragraph = (_currentParagraph + 1).clamp(
-      1,
-      widget.book.paragraphs.length,
-    );
-    return '$percent% · $paragraph / ${widget.book.paragraphs.length}';
+    return '$percent%';
   }
 
-  String get _batteryText => _batteryLevel < 0 ? '电量 —' : '电量 $_batteryLevel%';
+  String get _batteryText => _batteryLevel < 0 ? '' : '$_batteryLevel%';
   double get _progress {
     if (_readingMode == ReadingMode.page) {
       final total = _pager.estimatedTotalPageCount;
@@ -957,100 +939,23 @@ class _ReaderPageState extends State<ReaderPage>
     final progress = (_pullDownDistance / threshold).clamp(0.0, 1.2);
     final armed = _pullDownDistance >= threshold;
     final already = _isCurrentViewBookmarked;
-    final accent = VellumTheme.accentOf(context);
     final label = already
         ? (armed ? '松开取消书签' : '下拉取消书签')
         : (armed ? '松开添加书签' : '下拉添加书签');
-    // Ribbon length tracks the pull — Fanqie draws a bookmark ribbon that
-    // extends from the top edge, which reads much clearer than a floating pill.
-    final ribbonLength = (28 + progress * 52).clamp(28.0, 90.0);
-    final ribbonColor = armed
-        ? accent
-        : (already
-              ? accent.withValues(alpha: .55)
-              : VellumTheme.mutedOf(context).withValues(alpha: .7));
-
-    return IgnorePointer(
-      child: SafeArea(
-        child: Align(
-          alignment: Alignment.topCenter,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Bookmark ribbon sliding down from the top edge.
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 60),
-                width: 22,
-                height: ribbonLength,
-                decoration: BoxDecoration(
-                  color: ribbonColor,
-                  borderRadius: const BorderRadius.vertical(
-                    bottom: Radius.circular(4),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: CupertinoColors.black.withValues(alpha: .12),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Icon(
-                      armed || already
-                          ? CupertinoIcons.bookmark_fill
-                          : CupertinoIcons.bookmark,
-                      size: 14,
-                      color: CupertinoColors.white,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 6),
-              Opacity(
-                opacity: progress.clamp(0.25, 1.0),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: VellumTheme.readerChromeOf(context).withValues(
-                      alpha: .94,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: armed
-                          ? accent.withValues(alpha: .55)
-                          : VellumTheme.lineOf(context),
-                    ),
-                  ),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: armed ? accent : VellumTheme.inkOf(context),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return BookmarkRibbon(
+      progress: progress,
+      armed: armed,
+      alreadyBookmarked: already,
+      label: label,
     );
   }
 
   Color _backgroundFor(BuildContext context) =>
       _background ??
       (CupertinoTheme.of(context).brightness == Brightness.dark
-          ? VellumTheme.darkPaper
-          : VellumTheme.paper);
-bool _isScrollIdle() => true;
+          ? VellumTheme.readerNight
+          : VellumTheme.readerWhite);
+  bool _isScrollIdle() => true;
   void _handleReaderPointerMove(PointerMoveEvent event) {
     final down = _readerPointerDownPosition;
     if (down == null) return;
@@ -1073,17 +978,48 @@ bool _isScrollIdle() => true;
       return;
     }
     final dy = event.position.dy - down.dy;
+    final dx = event.position.dx - down.dx;
+    // A deliberate downward bookmark pull owns this gesture. Interrupt the
+    // PageView as soon as the vertical intent is clear so a slight diagonal
+    // movement cannot turn the page underneath the bookmark interaction.
+    if (_readingMode == ReadingMode.page &&
+        !_pointerLooksLikeSelection &&
+        dy > 18 &&
+        dy > dx.abs() * 1.25) {
+      _bookmarkPullInProgress = true;
+      _restorePageAfterBookmarkPull();
+    }
     final next = dy > 0 ? dy : 0.0;
     if ((next - _pullDownDistance).abs() > 0.5) {
       setState(() => _pullDownDistance = next);
     }
   }
 
+  void _restorePageAfterBookmarkPull() {
+    if (_readingMode != ReadingMode.page ||
+        !_pageController.hasClients ||
+        _pageCount <= 0) {
+      return;
+    }
+    final page = _pageBeforePointerDown.clamp(0, _pageCount - 1);
+    _pageController.jumpToPage(page);
+    if (_currentPage != page) {
+      setState(() {
+        _currentPage = page;
+        _requestedPage = page;
+      });
+    }
+  }
+
   void _handleReaderPointerUp(BuildContext context, PointerUpEvent event) {
     final pressedAt = _readerPointerDownAt;
     final pressedPosition = _readerPointerDownPosition;
-    final selectionGesture = _pointerLooksLikeSelection ||
+    final selectionGesture =
+        _pointerLooksLikeSelection ||
         (_lastSelectedText.isNotEmpty && _pullDownDistance > 0);
+    final wasBookmarkPull = _bookmarkPullInProgress;
+    if (wasBookmarkPull) _restorePageAfterBookmarkPull();
+    _bookmarkPullInProgress = false;
     _readerPointerDownAt = null;
     _readerPointerDownPosition = null;
     _pointerLooksLikeSelection = false;
@@ -1143,376 +1079,384 @@ bool _isScrollIdle() => true;
           if (navigator.canPop()) navigator.pop();
         },
         child: SafeArea(
-        child: Stack(
-          children: [
-            Localizations.override(
-              context: context,
-              delegates: const [DefaultMaterialLocalizations.delegate],
-              child: SelectionArea(
-                onSelectionChanged: (content) {
-                  _lastSelectedText = content?.plainText.trim() ?? '';
-                },
-                contextMenuBuilder: (context, selectableRegionState) {
-                  final selected = _lastSelectedText.trim();
-                  final buttonItems = <ContextMenuButtonItem>[
-                    // Keep the platform copy action (SelectionArea handles it).
-                    ...selectableRegionState.contextMenuButtonItems,
-                    if (selected.isNotEmpty)
-                      ContextMenuButtonItem(
-                        label: 'Bing 查询',
-                        onPressed: () {
-                          selectableRegionState.hideToolbar();
-                          openSelectionService(selected, translate: false);
-                        },
-                      ),
-                    if (selected.isNotEmpty)
-                      ContextMenuButtonItem(
-                        label: 'DeepL 翻译',
-                        onPressed: () {
-                          selectableRegionState.hideToolbar();
-                          openSelectionService(selected, translate: true);
-                        },
-                      ),
-                    if (selected.isNotEmpty)
-                      ContextMenuButtonItem(
-                        label: '笔记',
-                        onPressed: () async {
-                          selectableRegionState.hideToolbar();
-                          await showAddNoteSheet(
-                            context,
-                            bookId: _bookId,
-                            bookTitle: widget.book.title,
-                            paragraphIndex: _currentParagraph,
-                            selectedText: selected,
-                            notesLibrary: _notesLibrary,
-                          );
-                        },
-                      ),
-                  ];
-                  return CupertinoAdaptiveTextSelectionToolbar.buttonItems(
-                    anchors: selectableRegionState.contextMenuAnchors,
-                    buttonItems: buttonItems,
-                  );
-                },
-                child: Listener(
-                  onPointerDown: (event) {
-                    _readerPointerDownAt = DateTime.now();
-                    _readerPointerDownPosition = event.position;
-                    _pointerLooksLikeSelection = false;
-                    _selectionHoldTimer?.cancel();
-                    _selectionHoldTimer = Timer(
-                      const Duration(milliseconds: 400),
-                      () {
-                        _pointerLooksLikeSelection = true;
-                      },
+          child: Stack(
+            children: [
+              Localizations.override(
+                context: context,
+                delegates: const [DefaultMaterialLocalizations.delegate],
+                child: SelectionArea(
+                  onSelectionChanged: (content) {
+                    _lastSelectedText = content?.plainText.trim() ?? '';
+                  },
+                  contextMenuBuilder: (context, selectableRegionState) {
+                    final selected = _lastSelectedText.trim();
+                    final buttonItems = <ContextMenuButtonItem>[
+                      // Keep the platform copy action (SelectionArea handles it).
+                      ...selectableRegionState.contextMenuButtonItems,
+                      if (selected.isNotEmpty)
+                        ContextMenuButtonItem(
+                          label: 'Bing 查询',
+                          onPressed: () {
+                            selectableRegionState.hideToolbar();
+                            openSelectionService(selected, translate: false);
+                          },
+                        ),
+                      if (selected.isNotEmpty)
+                        ContextMenuButtonItem(
+                          label: 'DeepL 翻译',
+                          onPressed: () {
+                            selectableRegionState.hideToolbar();
+                            openSelectionService(selected, translate: true);
+                          },
+                        ),
+                      if (selected.isNotEmpty)
+                        ContextMenuButtonItem(
+                          label: '笔记',
+                          onPressed: () async {
+                            selectableRegionState.hideToolbar();
+                            await showAddNoteSheet(
+                              context,
+                              bookId: _bookId,
+                              bookTitle: widget.book.title,
+                              paragraphIndex: _currentParagraph,
+                              selectedText: selected,
+                              notesLibrary: _notesLibrary,
+                            );
+                          },
+                        ),
+                    ];
+                    return CupertinoAdaptiveTextSelectionToolbar.buttonItems(
+                      anchors: selectableRegionState.contextMenuAnchors,
+                      buttonItems: buttonItems,
                     );
                   },
-                  onPointerMove: _handleReaderPointerMove,
-                  onPointerCancel: (_) {
-                    _selectionHoldTimer?.cancel();
-                    _readerPointerDownAt = null;
-                    _readerPointerDownPosition = null;
-                    _pointerLooksLikeSelection = false;
-                    if (_pullDownDistance != 0) {
-                      setState(() => _pullDownDistance = 0);
-                    }
-                  },
-                  onPointerUp: (event) {
-                    _selectionHoldTimer?.cancel();
-                    _handleReaderPointerUp(context, event);
-                  },
-                  child: _readingMode == ReadingMode.scroll
-                      ? NotificationListener<ScrollNotification>(
-                          onNotification: _handleBookmarkPull,
-                          child: ListView.builder(
-                            controller: _scrollController,
-                            padding: EdgeInsets.fromLTRB(
-                              28,
-                              28,
-                              28,
-                              _readerBottomInset,
+                  child: Listener(
+                    onPointerDown: (event) {
+                      _readerPointerDownAt = DateTime.now();
+                      _readerPointerDownPosition = event.position;
+                      _bookmarkPullInProgress = false;
+                      _pageBeforePointerDown = _currentPage;
+                      _pointerLooksLikeSelection = false;
+                      _selectionHoldTimer?.cancel();
+                      _selectionHoldTimer = Timer(
+                        const Duration(milliseconds: 400),
+                        () {
+                          _pointerLooksLikeSelection = true;
+                        },
+                      );
+                    },
+                    onPointerMove: _handleReaderPointerMove,
+                    onPointerCancel: (_) {
+                      _selectionHoldTimer?.cancel();
+                      _readerPointerDownAt = null;
+                      _readerPointerDownPosition = null;
+                      _pointerLooksLikeSelection = false;
+                      if (_bookmarkPullInProgress) {
+                        _restorePageAfterBookmarkPull();
+                        _bookmarkPullInProgress = false;
+                      }
+                      if (_pullDownDistance != 0) {
+                        setState(() => _pullDownDistance = 0);
+                      }
+                    },
+                    onPointerUp: (event) {
+                      _selectionHoldTimer?.cancel();
+                      _handleReaderPointerUp(context, event);
+                    },
+                    child: _readingMode == ReadingMode.scroll
+                        ? NotificationListener<ScrollNotification>(
+                            onNotification: _handleBookmarkPull,
+                            child: ListView.builder(
+                              controller: _scrollController,
+                              padding: EdgeInsets.fromLTRB(
+                                _readerSideInset,
+                                _readerTopInset,
+                                _readerSideInset,
+                                _readerBottomInset,
+                              ),
+                              itemCount: widget.book.paragraphs.length + 2,
+                              itemBuilder: (context, index) {
+                                if (index == 0) return _title(context);
+                                if (index == 1) {
+                                  return const SizedBox(height: 30);
+                                }
+                                final paragraphIndex = index - 2;
+                                final isHeading =
+                                    ReaderMarkup.heading.hasMatch(
+                                      widget.book.paragraphs[paragraphIndex],
+                                    ) ||
+                                    _tocParagraphs.contains(paragraphIndex);
+                                return KeyedSubtree(
+                                  key: _paragraphKeys.putIfAbsent(
+                                    paragraphIndex,
+                                    () => GlobalKey(),
+                                  ),
+                                  child: Padding(
+                                    padding: EdgeInsets.only(
+                                      bottom: 22,
+                                      top: isHeading ? 10 : 0,
+                                    ),
+                                    child: ReaderParagraph(
+                                      book: widget.book,
+                                      paragraph: widget
+                                          .book
+                                          .paragraphs[paragraphIndex],
+                                      paragraphIndex: paragraphIndex,
+                                      fontSize: _fontSize,
+                                      fontFamily: _readerFontFamily,
+                                      lineSpacing: _lineSpacing,
+                                      fontWeight: _readerFontWeight,
+                                      ink: VellumTheme.readerInkFor(
+                                        _backgroundFor(context),
+                                      ),
+                                      contextMenuBuilder:
+                                          createReaderSelectionToolbar(
+                                            bookId: _bookId,
+                                            bookTitle: widget.book.title,
+                                            currentParagraph: () =>
+                                                paragraphIndex,
+                                            notesLibrary: _notesLibrary,
+                                            onHighlight: _toggleHighlight,
+                                          ),
+                                      highlights:
+                                          _highlights[paragraphIndex] ??
+                                          const [],
+                                      isChapterHeading: _tocParagraphs.contains(
+                                        paragraphIndex,
+                                      ),
+                                      onJumpToParagraph: _jumpToParagraph,
+                                    ),
+                                  ),
+                                );
+                              },
                             ),
-                            itemCount: widget.book.paragraphs.length + 2,
-                            itemBuilder: (context, index) {
-                              if (index == 0) return _title(context);
-                              if (index == 1) {
-                                return const SizedBox(height: 30);
-                              }
-                              final paragraphIndex = index - 2;
-                              final isHeading = ReaderMarkup.heading
-                                      .hasMatch(widget.book.paragraphs[paragraphIndex]) ||
-                                  _tocParagraphs.contains(paragraphIndex);
-                              return KeyedSubtree(
-                                key: _paragraphKeys.putIfAbsent(
-                                  paragraphIndex,
-                                  () => GlobalKey(),
-                                ),
-                                child: Padding(
-                                  padding: EdgeInsets.only(
-                                    bottom: 22,
-                                    top: isHeading ? 10 : 0,
+                          )
+                        : Builder(
+                            builder: (context) {
+                              _restorePageWhenReady();
+                              return PageView.builder(
+                                controller: _pageController,
+                                scrollDirection: Axis.horizontal,
+                                physics: const SnapPageScrollPhysics(),
+                                allowImplicitScrolling: true,
+                                itemCount: _pageCount,
+                                onPageChanged: (index) {
+                                  if (_bookmarkPullInProgress) {
+                                    return;
+                                  }
+                                  if (_coverJumping || _slideBusy) {
+                                    return;
+                                  }
+                                  setState(() {
+                                    _currentPage = index;
+                                    _requestedPage = index;
+                                  });
+                                  _maybeExtendPagination();
+                                  _scheduleSave();
+                                },
+                                itemBuilder: (context, index) => Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    _readerSideInset,
+                                    _readerTopInset,
+                                    _readerSideInset,
+                                    _readerBottomInset,
                                   ),
-                                  child: ReaderParagraph(
-                                    book: widget.book,
-                                    paragraph: widget
-                                        .book.paragraphs[paragraphIndex],
-                                    paragraphIndex: paragraphIndex,
-                                    fontSize: _fontSize,
-                                    fontFamily: _readerFontFamily,
-                                    lineSpacing: _lineSpacing,
-                                    fontWeight: _readerFontWeight,
-                                    ink: VellumTheme.readerInkFor(
-                                      _backgroundFor(context),
-                                    ),
-                                    contextMenuBuilder:
-                                        createReaderSelectionToolbar(
-                                          bookId: _bookId,
-                                          bookTitle: widget.book.title,
-                                          currentParagraph: () =>
-                                              paragraphIndex,
-                                          notesLibrary: _notesLibrary,
-                                          onHighlight: _toggleHighlight,
-                                        ),
-                                    highlights:
-                                        _highlights[paragraphIndex] ??
-                                        const [],
-                                    isChapterHeading: _tocParagraphs.contains(
-                                      paragraphIndex,
-                                    ),
-                                    onJumpToParagraph: _jumpToParagraph,
-                                  ),
+                                  child: _readingPage(context, index),
                                 ),
                               );
                             },
                           ),
-                        )
-                      : Builder(
-                          builder: (context) {
-                            _restorePageWhenReady();
-                            return PageView.builder(
-                              controller: _pageController,
-                              scrollDirection: Axis.horizontal,
-                              physics: const SnapPageScrollPhysics(),
-                              allowImplicitScrolling: true,
-                              itemCount: _pageCount,
-                              onPageChanged: (index) {
-                                if (_coverJumping || _slideBusy) {
-                                  return;
-                                }
-                                setState(() {
-                                  _currentPage = index;
-                                  _requestedPage = index;
-                                });
-                                _maybeExtendPagination();
-                                _scheduleSave();
-                              },
-                              itemBuilder: (context, index) => Padding(
-                                padding: EdgeInsets.fromLTRB(
-                                  28,
-                                  20,
-                                  28,
-                                  _readerBottomInset,
-                                ),
-                                child: _readingPage(context, index),
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ),
-            ),
-            if (_pullDownDistance > 8) _bookmarkPullIndicator(context),
-            if (_coverFromPage != null) _coverTurnOverlay(context),
-            if (_eyeCare != ReaderEyeCare.off)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: ColoredBox(
-                    color: const Color(
-                      0xffd9a441,
-                    ).withValues(alpha: _eyeCare.opacity),
                   ),
                 ),
               ),
-            // Fanqie BottomIndicator slot: bottom-center, marginBottom 18dp,
-            // visible only while the menu is hidden.
-            if (!_showControls)
-              ReaderStatusBar(
-                progressLabel: _pageProgress,
-                batteryLabel: _batteryText,
-                chapterLabel: _chapterLabel,
-                remainingLabel: _remainingLabel,
-                surface: _backgroundFor(context),
-              ),
-            if (_isCurrentViewBookmarked)
-              IgnorePointer(
-                child: SafeArea(
+              if (_pullDownDistance > 8) _bookmarkPullIndicator(context),
+              if (_coverFromPage != null) _coverTurnOverlay(context),
+              if (_eyeCare != ReaderEyeCare.off)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ColoredBox(
+                      color: const Color(
+                        0xffd9a441,
+                      ).withValues(alpha: _eyeCare.opacity),
+                    ),
+                  ),
+                ),
+              // Fanqie BottomIndicator: page + battery only when chrome is hidden.
+              if (!_showControls)
+                ReaderStatusBar(
+                  pageLabel: _pageProgress,
+                  batteryLabel: _batteryText,
+                  surface: _backgroundFor(context),
+                ),
+              if (!_showControls)
+                ReaderRunningHead(
+                  chapterLabel: _chapterLabel,
+                  surface: _backgroundFor(context),
+                ),
+              if (_isCurrentViewBookmarked)
+                Semantics(
+                  label: '当前阅读页面已添加书签',
+                  child: const BookmarkRibbon(
+                    progress: 1,
+                    armed: false,
+                    alreadyBookmarked: true,
+                    label: '',
+                    pinned: true,
+                    showLabel: false,
+                  ),
+                ),
+              if (_bookmarkNotice != null)
+                SafeArea(
                   child: Align(
                     alignment: Alignment.topCenter,
-                    child: Semantics(
-                      label: '当前阅读页面已添加书签',
-                      child: Container(
-                        width: 96,
-                        height: 5,
-                        margin: const EdgeInsets.only(top: 3),
-                        decoration: const BoxDecoration(
-                          color: CupertinoColors.systemRed,
-                          borderRadius: BorderRadius.vertical(
-                            bottom: Radius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 42),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: VellumTheme.cardOf(context),
+                          borderRadius: BorderRadius.circular(18),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x33000000), blurRadius: 12),
+                          ],
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 9,
+                          ),
+                          child: Text(
+                            _bookmarkNotice!,
+                            style: TextStyle(
+                              color: VellumTheme.inkOf(context),
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            if (_bookmarkNotice != null)
-              SafeArea(
-                child: Align(
-                  alignment: Alignment.topCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 42),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: VellumTheme.cardOf(context),
-                        borderRadius: BorderRadius.circular(18),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x33000000), blurRadius: 12),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 9,
-                        ),
-                        child: Text(
-                          _bookmarkNotice!,
-                          style: TextStyle(
-                            color: VellumTheme.inkOf(context),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
+              // Fanqie ReaderMenu: Stack overlay (not Dialog), top bar -44dp /
+              // bottom bar height, both 300ms. Font picker stays wired via
+              // onShowFonts → existing FontPickerSheet.
+              ReaderMenu(
+                visible: _showControls,
+                bookTitle: widget.book.title,
+                bookmarked: _isCurrentViewBookmarked,
+                // Fanqie TopBar exit: leave the reader route. Progress is
+                // flushed in dispose()/didChangeAppLifecycle.
+                onBack: () {
+                  final navigator = Navigator.of(context);
+                  if (navigator.canPop()) {
+                    navigator.pop();
+                  } else {
+                    setState(() => _showControls = false);
+                  }
+                },
+                // Tap outside only collapses chrome — not an exit.
+                onDismiss: () => setState(() => _showControls = false),
+                onToggleBookmark: _toggleBookmarkAtCurrentPosition,
+                progress: _progress,
+                chapterCount: _chapters.length,
+                currentChapterIndex: _chapterIndexFor(_activeParagraph) < 0
+                    ? 0
+                    : _chapterIndexFor(_activeParagraph),
+                chapterTitle: _chapterLabel,
+                canSeek: _canSeekProgress,
+                onSeekProgress: _jumpToProgress,
+                onSeekChapter: _jumpToChapter,
+                fontSize: _fontSize,
+                readerFontWeight: _readerFontWeight,
+                lineSpacing: _lineSpacing,
+                background: _backgroundFor(context),
+                readingMode: _readingMode,
+                pageTurnStyle: _pageTurnStyle,
+                brightness: _brightness,
+                eyeCare: _eyeCare,
+                keepScreenOn: _keepScreenOn,
+                volumeKeys: _volumeKeys,
+                chapters: _chapterEntries(),
+                chapterPageLabels: _chapterPageLabels(),
+                bookmarks: [
+                  for (final bookmark in _bookmarks)
+                    MapEntry(
+                      bookmark,
+                      bookmarkSummary(widget.book.paragraphs, bookmark),
                     ),
-                  ),
-                ),
-              ),
-            // Fanqie ReaderMenu: Stack overlay (not Dialog), top bar -44dp /
-            // bottom bar height, both 300ms. Font picker stays wired via
-            // onShowFonts → existing FontPickerSheet.
-            ReaderMenu(
-              visible: _showControls,
-              bookTitle: widget.book.title,
-              bookmarked: _isCurrentViewBookmarked,
-              // Fanqie TopBar exit: leave the reader route. Progress is
-              // flushed in dispose()/didChangeAppLifecycle.
-              onBack: () {
-                final navigator = Navigator.of(context);
-                if (navigator.canPop()) {
-                  navigator.pop();
-                } else {
+                ],
+                notes: _notes,
+                currentParagraph: _activeParagraph,
+                onJumpToParagraph: (paragraph) {
                   setState(() => _showControls = false);
-                }
-              },
-              // Tap outside only collapses chrome — not an exit.
-              onDismiss: () => setState(() => _showControls = false),
-              onToggleBookmark: _toggleBookmarkAtCurrentPosition,
-              progress: _progress,
-              chapterCount: _chapters.length,
-              currentChapterIndex: _chapterIndexFor(_activeParagraph) < 0
-                  ? 0
-                  : _chapterIndexFor(_activeParagraph),
-              chapterTitle: _chapterLabel,
-              canSeek: _canSeekProgress,
-              onSeekProgress: _jumpToProgress,
-              onSeekChapter: _jumpToChapter,
-              fontSize: _fontSize,
-              readerFontWeight: _readerFontWeight,
-              lineSpacing: _lineSpacing,
-              background: _backgroundFor(context),
-              readingMode: _readingMode,
-              pageTurnStyle: _pageTurnStyle,
-              brightness: _brightness,
-              eyeCare: _eyeCare,
-              keepScreenOn: _keepScreenOn,
-              volumeKeys: _volumeKeys,
-              chapters: _chapterEntries(),
-              chapterPageLabels: _chapterPageLabels(),
-              bookmarks: [
-                for (final bookmark in _bookmarks)
-                  MapEntry(
-                    bookmark,
-                    bookmarkSummary(widget.book.paragraphs, bookmark),
-                  ),
-              ],
-              notes: _notes,
-              currentParagraph: _activeParagraph,
-              onJumpToParagraph: (paragraph) {
-                setState(() => _showControls = false);
-                _jumpToParagraph(paragraph);
-              },
-              onRemoveBookmark: _removeBookmark,
-              onRemoveNote: _removeNote,
-              onFontSize: (value) {
-                setState(() {
-                  _fontSize = value;
-                });
-                _scheduleSave();
-              },
-              onReaderFontWeight: (value) {
-                setState(() => _readerFontWeight = value);
-                _saveTimer?.cancel();
-                _saveState();
-              },
-              onLineSpacing: (value) {
-                setState(() => _lineSpacing = value);
-                _saveTimer?.cancel();
-                _saveState();
-              },
-              onBackground: (value) {
-                setState(() => _background = value);
-                _scheduleSave();
-              },
-              onReadingMode: (value) {
-                _setReadingMode(value);
-              },
-              onPageTurnStyle: (value) {
-                setState(() => _pageTurnStyle = value);
-                _saveTimer?.cancel();
-                _saveState();
-              },
-              onBrightness: (value) {
-                setState(() => _brightness = value);
-                _platform.setBrightness(value);
-                _scheduleSave();
-              },
-              onEyeCare: (value) {
-                setState(() => _eyeCare = value);
-                _saveTimer?.cancel();
-                _saveState();
-              },
-              onKeepScreenOn: (value) {
-                setState(() => _keepScreenOn = value);
-                _platform.setKeepScreenOn(value);
-                _saveTimer?.cancel();
-                _saveState();
-              },
-              onVolumeKeys: (value) {
-                setState(() => _volumeKeys = value);
-                _syncVolumeKeys();
-                _saveTimer?.cancel();
-                _saveState();
-              },
-              onShowFonts: _showFontPicker,
-              onToggleUiTheme: widget.onToggleUiTheme,
-            ),
-          ],
-        ),
+                  _jumpToParagraph(paragraph);
+                },
+                onRemoveBookmark: _removeBookmark,
+                onRemoveNote: _removeNote,
+                onFontSize: (value) {
+                  setState(() {
+                    _fontSize = value;
+                  });
+                  _scheduleSave();
+                },
+                onReaderFontWeight: (value) {
+                  setState(() => _readerFontWeight = value);
+                  _saveTimer?.cancel();
+                  _saveState();
+                },
+                onLineSpacing: (value) {
+                  setState(() => _lineSpacing = value);
+                  _saveTimer?.cancel();
+                  _saveState();
+                },
+                onBackground: (value) {
+                  setState(() => _background = value);
+                  _scheduleSave();
+                },
+                onReadingMode: (value) {
+                  _setReadingMode(value);
+                },
+                onPageTurnStyle: (value) {
+                  setState(() => _pageTurnStyle = value);
+                  _saveTimer?.cancel();
+                  _saveState();
+                },
+                onBrightness: (value) {
+                  setState(() => _brightness = value);
+                  _platform.setBrightness(value);
+                  _scheduleSave();
+                },
+                onEyeCare: (value) {
+                  setState(() => _eyeCare = value);
+                  _saveTimer?.cancel();
+                  _saveState();
+                },
+                onKeepScreenOn: (value) {
+                  setState(() => _keepScreenOn = value);
+                  _platform.setKeepScreenOn(value);
+                  _saveTimer?.cancel();
+                  _saveState();
+                },
+                onVolumeKeys: (value) {
+                  setState(() => _volumeKeys = value);
+                  _syncVolumeKeys();
+                  _saveTimer?.cancel();
+                  _saveState();
+                },
+                onShowFonts: _showFontPicker,
+                onToggleUiTheme: widget.onToggleUiTheme,
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _readingPage(BuildContext context, int pageIndex, {bool selectable = true}) {
+  Widget _readingPage(
+    BuildContext context,
+    int pageIndex, {
+    bool selectable = true,
+  }) {
     if (_pages.isEmpty) return const SizedBox.shrink();
     final page = pageIndex.clamp(0, _pages.length - 1);
     final fragments = _pages[page];
@@ -1551,7 +1495,9 @@ bool _isScrollIdle() => true;
                           fontFamily: _readerFontFamily,
                           lineSpacing: _lineSpacing,
                           fontWeight: _readerFontWeight,
-                          ink: VellumTheme.readerInkFor(_backgroundFor(context)),
+                          ink: VellumTheme.readerInkFor(
+                            _backgroundFor(context),
+                          ),
                           contextMenuBuilder: createReaderSelectionToolbar(
                             bookId: _bookId,
                             bookTitle: widget.book.title,
@@ -1740,10 +1686,12 @@ bool _isScrollIdle() => true;
     final to = _coverToPage;
     if (from == null || to == null) return const SizedBox.shrink();
     final isNext = to > from;
-    // Fanqie「覆盖」: the incoming page slides *over* the stationary current
-    // page (not the old page sliding away). Old page stays put underneath.
-    final movingPage = to;
-    final staticPage = from;
+    // Fanqie「覆盖」mode 2 (`pager/s.java` `w()`):
+    // - 下一页: slipTarget = current；current **向左滑出**，next 钉在底下不动。
+    // - 上一页: slipTarget = previous；previous **从左盖上来**，current 不动。
+    // (Vellum used to slide the destination in from the right on next — reversed.)
+    final movingPage = isNext ? from : to;
+    final staticPage = isNext ? to : from;
     // Page surfaces are built once (as AnimatedBuilder.child) and only the
     // slide offset updates each frame. RepaintBoundary lets Flutter rasterize
     // the expensive text layers once, then just move them.
@@ -1765,7 +1713,9 @@ bool _isScrollIdle() => true;
                             color: CupertinoColors.black.withValues(alpha: .22),
                             blurRadius: 18,
                             spreadRadius: 1,
-                            offset: Offset(isNext ? -10 : 10, 0),
+                            // Leading edge sits on the right in both directions
+                            // (next exits left; prev enters from the left).
+                            offset: const Offset(10, 0),
                           ),
                         ],
                       ),
@@ -1778,9 +1728,9 @@ bool _isScrollIdle() => true;
                     final progress = Curves.easeOutCubic.transform(
                       _coverAnim.value,
                     );
-                    // Next: incoming page starts off-screen right (dx=1→0).
-                    // Prev: incoming page starts off-screen left (dx=-1→0).
-                    final dx = isNext ? 1 - progress : -1 + progress;
+                    // Next: current slides out to the left (dx 0→-1).
+                    // Prev: previous slides in from the left (dx -1→0).
+                    final dx = isNext ? -progress : -1 + progress;
                     return FractionalTranslation(
                       translation: Offset(dx, 0),
                       child: child,
@@ -1800,7 +1750,12 @@ bool _isScrollIdle() => true;
     return ColoredBox(
       color: _backgroundFor(context),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(28, 20, 28, _readerBottomInset),
+        padding: EdgeInsets.fromLTRB(
+          _readerSideInset,
+          _readerTopInset,
+          _readerSideInset,
+          _readerBottomInset,
+        ),
         // selectable:true matches the PageView builder exactly. Rendering the
         // overlay with selectable:false used SelectableText vs Text and let
         // the two widgets lay out differently — the page visibly "settled"

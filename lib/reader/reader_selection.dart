@@ -145,7 +145,9 @@ Future<void> showAddNoteSheet(
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 13,
-                          color: CupertinoColors.secondaryLabel.resolveFrom(ctx),
+                          color: CupertinoColors.secondaryLabel.resolveFrom(
+                            ctx,
+                          ),
                         ),
                       ),
                     ),

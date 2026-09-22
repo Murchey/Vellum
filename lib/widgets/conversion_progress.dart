@@ -42,10 +42,7 @@ class ConversionProgress extends StatelessWidget {
               ),
             ),
             if (percent != null)
-              Text(
-                '$percent%',
-                style: TextStyle(color: muted, fontSize: 12),
-              ),
+              Text('$percent%', style: TextStyle(color: muted, fontSize: 12)),
           ],
         ),
         const SizedBox(height: 8),
@@ -61,8 +58,11 @@ class ConversionProgress extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: AnimatedFractionallySizedBox(
                     duration: const Duration(milliseconds: 180),
-                    widthFactor: clamped ??
-                        (stage.isEmpty ? 0.08 : 0.35 + ((stage.hashCode % 40) / 100)),
+                    widthFactor:
+                        clamped ??
+                        (stage.isEmpty
+                            ? 0.08
+                            : 0.35 + ((stage.hashCode % 40) / 100)),
                     child: ColoredBox(color: accent),
                   ),
                 ),

@@ -148,9 +148,7 @@ class _EbookToTxtPageState extends State<EbookToTxtPage> {
           dialogTitle: '选择导出文件夹',
         );
         if (directory == null || directory.isEmpty) return null;
-        final file = File(
-          '$directory${Platform.pathSeparator}$suggestedName',
-        );
+        final file = File('$directory${Platform.pathSeparator}$suggestedName');
         await file.writeAsString(text, encoding: utf8, flush: true);
         return file.path;
       } catch (_) {
@@ -177,7 +175,11 @@ class _EbookToTxtPageState extends State<EbookToTxtPage> {
     final accent = VellumTheme.accentOf(context);
 
     return CupertinoPageScaffold(
-      navigationBar: const CupertinoNavigationBar(middle: Text('转为 TXT')),
+      navigationBar: CupertinoNavigationBar(
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
+        middle: const Text('转为 TXT'),
+      ),
       backgroundColor: CupertinoTheme.of(context).scaffoldBackgroundColor,
       // Avoid large system font sizes stretching chrome labels off-screen.
       child: MediaQuery.withClampedTextScaling(

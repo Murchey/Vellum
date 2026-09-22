@@ -84,7 +84,10 @@ class MobiHuffCdic {
       final end = start + (blen & 0x7fff);
       if (end > cdic.length) continue;
       _dictionary.add(
-        _CdicEntry(Uint8List.sublistView(cdic, start, end), (blen & 0x8000) != 0),
+        _CdicEntry(
+          Uint8List.sublistView(cdic, start, end),
+          (blen & 0x8000) != 0,
+        ),
       );
     }
   }
@@ -233,12 +236,7 @@ class MobiDecoder {
         // Huffman/CDIC — common on Amazon-produced MOBI. Fanqie's
         // libmobiparser.so handles this via MobiHuffCdic; Vellum previously
         // only decoded PalmDOC (compression 2) and threw on these books.
-        final huff = _findMagicRecord(
-          bytes,
-          offsets,
-          textRecords + 1,
-          'HUFF',
-        );
+        final huff = _findMagicRecord(bytes, offsets, textRecords + 1, 'HUFF');
         final cdic = _findAllMagicRecords(
           bytes,
           offsets,
@@ -246,13 +244,13 @@ class MobiDecoder {
           'CDIC',
         );
         if (huff == null || cdic.isEmpty) {
-          throw const BookImportException(
-            'MOBI 使用 Huffman 压缩但缺少词典记录。',
-          );
+          throw const BookImportException('MOBI 使用 Huffman 压缩但缺少词典记录。');
         }
         final decoder = MobiHuffCdic()..load(huff, cdic);
         for (var index = 1; index <= textRecords; index++) {
-          final remaining = textLength == 0 ? null : textLength - builder.length;
+          final remaining = textLength == 0
+              ? null
+              : textLength - builder.length;
           if (remaining != null && remaining <= 0) break;
           final start = offsets[index];
           final end = index + 1 < records ? offsets[index + 1] : bytes.length;
@@ -269,7 +267,9 @@ class MobiDecoder {
         }
       } else {
         for (var index = 1; index <= textRecords; index++) {
-          final remaining = textLength == 0 ? null : textLength - builder.length;
+          final remaining = textLength == 0
+              ? null
+              : textLength - builder.length;
           if (remaining != null && remaining <= 0) break;
           final recordLimit = remaining == null || remaining > 4096
               ? 4096
@@ -314,7 +314,13 @@ class MobiDecoder {
         throw const BookImportException('MOBI 中没有可阅读的正文。');
       }
       final coverBytes =
-          mobiCover(bytes, data, offsets, header, coverOffset: meta.coverOffset) ??
+          mobiCover(
+            bytes,
+            data,
+            offsets,
+            header,
+            coverOffset: meta.coverOffset,
+          ) ??
           firstImageAsCover(bytes, offsets, textRecords);
       return ImportedBook(
         title: title,
@@ -368,10 +374,7 @@ class MobiDecoder {
   /// Decodes MOBI metadata bytes trying declared encoding → UTF-8 → GBK →
   /// latin1. Chinese MOBI files frequently store metadata in GBK even when
   /// the text-encoding field says cp1252.
-  String _decodeMobiMetaString(
-    List<int> raw, {
-    int? declaredEncoding,
-  }) {
+  String _decodeMobiMetaString(List<int> raw, {int? declaredEncoding}) {
     if (raw.isEmpty) return '';
     String tryUtf8() => utf8.decode(raw, allowMalformed: false);
     String tryGbk() => gbk.decode(raw, allowMalformed: false);
@@ -397,15 +400,12 @@ class MobiDecoder {
   /// means the bytes were UTF-8/GBK decoded as latin1.
   static bool _looksMojibake(String value) {
     if (_hasCjk(value)) return false;
-    final supplement = RegExp(
-      r'[À-ÿ]{2,}',
-    ).allMatches(value).length;
+    final supplement = RegExp(r'[À-ÿ]{2,}').allMatches(value).length;
     return supplement >= 2;
   }
 
-  static bool _hasCjk(String value) => RegExp(
-    '[\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff]',
-  ).hasMatch(value);
+  static bool _hasCjk(String value) =>
+      RegExp('[\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff]').hasMatch(value);
 
   /// True when [value] is plausible shelf metadata, not a product code.
   @visibleForTesting
@@ -415,8 +415,10 @@ class MobiDecoder {
     // Pure digits / hex / id-ish tokens (ASIN, ISBN-ish, record ids).
     if (RegExp(r'^[0-9]+$').hasMatch(text)) return false;
     if (RegExp(r'^[0-9A-Fa-f]{6,}$').hasMatch(text)) return false;
-    if (RegExp(r'^(EBOK|BOOK|BOK|ITEM)[0-9A-Za-z\-_]*$', caseSensitive: false)
-        .hasMatch(text)) {
+    if (RegExp(
+      r'^(EBOK|BOOK|BOK|ITEM)[0-9A-Za-z\-_]*$',
+      caseSensitive: false,
+    ).hasMatch(text)) {
       return false;
     }
     // Must contain at least one letter or CJK character.
@@ -476,12 +478,7 @@ class MobiDecoder {
     required String fullName,
   }) {
     final fileTitle = pipeline.titleFromFilename(filename);
-    final candidates = <String>[
-      exthTitle,
-      fullName,
-      palmName,
-      fileTitle,
-    ];
+    final candidates = <String>[exthTitle, fullName, palmName, fileTitle];
     String? best;
     var bestScore = -10000;
     for (final raw in candidates) {
@@ -507,7 +504,9 @@ class MobiDecoder {
     final units = ascii.encode(magic);
     for (var record = fromRecord; record < offsets.length; record++) {
       final start = offsets[record];
-      final end = record + 1 < offsets.length ? offsets[record + 1] : bytes.length;
+      final end = record + 1 < offsets.length
+          ? offsets[record + 1]
+          : bytes.length;
       if (start + 4 > end || end > bytes.length) continue;
       if (bytes[start] == units[0] &&
           bytes[start + 1] == units[1] &&
@@ -531,7 +530,9 @@ class MobiDecoder {
     final found = <Uint8List>[];
     for (var record = fromRecord; record < offsets.length; record++) {
       final start = offsets[record];
-      final end = record + 1 < offsets.length ? offsets[record + 1] : bytes.length;
+      final end = record + 1 < offsets.length
+          ? offsets[record + 1]
+          : bytes.length;
       if (start + 4 > end || end > bytes.length) continue;
       if (bytes[start] == units[0] &&
           bytes[start + 1] == units[1] &&
@@ -575,10 +576,7 @@ class MobiDecoder {
         if (length < 8 || cursor + length > bytes.length) break;
         final payload = bytes.sublist(cursor + 8, cursor + length);
         if (type == 100 && author.isEmpty) {
-          author = _decodeMobiMetaString(
-            payload,
-            declaredEncoding: declared,
-          );
+          author = _decodeMobiMetaString(payload, declaredEncoding: declared);
         } else if (type == 503 && updatedTitle.isEmpty) {
           updatedTitle = _decodeMobiMetaString(
             payload,
@@ -656,7 +654,7 @@ class MobiDecoder {
     // store an absolute record index instead. Try relative first.
     final candidates = <int>[
       if (coverOffset != null && firstImage != 0) firstImage + coverOffset,
-      if (coverOffset != null) coverOffset,
+      ?coverOffset,
       firstImage,
     ];
     for (final record in candidates) {
@@ -808,9 +806,7 @@ class MobiDecoder {
       }
       final paragraphIndex = resolved[index].clamp(0, paragraphs.length - 1);
       if (!seen.add(paragraphIndex)) continue;
-      entries.add(
-        BookTocEntry(title: title, paragraphIndex: paragraphIndex),
-      );
+      entries.add(BookTocEntry(title: title, paragraphIndex: paragraphIndex));
     }
     // If most anchors were junk (encoding damage, HTML leftovers), drop the
     // whole TOC so `chapterEntries` can rebuild from body-text heuristics
@@ -884,9 +880,7 @@ class MobiDecoder {
     // Replacement characters from failed decodes.
     if (text.contains('�')) return true;
     // Mostly symbols / punctuation / leftover markup glyphs.
-    final letters = RegExp(
-      r'[A-Za-z0-9一-鿿㐀-䶿]',
-    ).allMatches(text).length;
+    final letters = RegExp(r'[A-Za-z0-9一-鿿㐀-䶿]').allMatches(text).length;
     if (letters < text.length * 0.35) return true;
     // Classic junk anchors: lone punctuation, "…" only, etc.
     if (RegExp(r'^[\s\.\,\;\:\-\_\|\*\/\\\#\@\!\?…—–]+$').hasMatch(text)) {
@@ -974,10 +968,7 @@ class MobiDecoder {
     return -1;
   }
 
-  List<int> utf8OffsetsToStringOffsets(
-    String source,
-    List<int> targets,
-  ) {
+  List<int> utf8OffsetsToStringOffsets(String source, List<int> targets) {
     final ordered = <({int target, int original})>[
       for (var index = 0; index < targets.length; index++)
         (target: targets[index].clamp(0, 1 << 62), original: index),

@@ -51,11 +51,11 @@ void main() {
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerMint),
-      CupertinoColors.black,
+      VellumTheme.readerBodyInk,
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerSepia),
-      CupertinoColors.black,
+      VellumTheme.readerBodyInk,
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerCharcoal),
@@ -63,12 +63,16 @@ void main() {
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerBlue),
-      CupertinoColors.black,
+      VellumTheme.readerBodyInk,
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerWhite),
-      CupertinoColors.black,
+      VellumTheme.readerBodyInk,
     );
+    // Fanqie brand orange lives on the reader only.
+    expect(VellumTheme.readerAccent, const Color(0xfffa6725));
+    // App shell keeps quiet wine so nav bars stay familiar.
+    expect(VellumTheme.accent, const Color(0xffa33d2e));
   });
 
   testWidgets('switches application theme from inside the app', (tester) async {
@@ -152,18 +156,33 @@ void main() {
     await tester.pumpAndSettle();
 
     // First level: mode + font size + brightness + paper + font + line space.
-    // Reading mode stays on the front page — burying it hurt usability.
+    // Half-screen sheet may clip the tail — scroll the panel if needed.
+    Future<void> ensureSetting(String label) async {
+      final finder = find.text(label);
+      if (finder.evaluate().isEmpty) return;
+      var guard = 0;
+      while (guard < 6) {
+        final hit = tester.getTopLeft(finder).dy;
+        if (hit >= 0 && hit < 600) return;
+        await tester.drag(
+          find.byType(ReaderSettingsPanel),
+          const Offset(0, -80),
+        );
+        await tester.pumpAndSettle();
+        guard++;
+      }
+    }
+
     expect(find.text('阅读设置'), findsOneWidget);
     expect(find.text('阅读方式'), findsOneWidget);
     expect(find.text('字号'), findsOneWidget);
     expect(find.text('亮度'), findsOneWidget);
     expect(find.text('背景'), findsOneWidget);
-    expect(find.text('字体'), findsOneWidget);
-    expect(find.text('行间距'), findsOneWidget);
-    expect(find.text('更多设置'), findsOneWidget);
     expect(find.text('字重'), findsNothing);
     expect(find.text('常亮'), findsNothing);
 
+    await ensureSetting('更多设置');
+    await tester.ensureVisible(find.text('更多设置'));
     await tester.tap(find.text('更多设置'));
     await tester.pumpAndSettle();
 
@@ -247,16 +266,23 @@ void main() {
     // Fanqie structure: 字体 lives inside the settings panel.
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('字体'));
+    // Half-screen sheet: bring 字体 into view before tapping.
+    final fontFinder = find.text('字体');
+    var guard = 0;
+    while (fontFinder.evaluate().isNotEmpty &&
+        tester.getTopLeft(fontFinder).dy >= 600 &&
+        guard < 6) {
+      await tester.drag(find.byType(ReaderSettingsPanel), const Offset(0, -80));
+      await tester.pumpAndSettle();
+      guard++;
+    }
+    await tester.ensureVisible(fontFinder);
+    await tester.tap(fontFinder);
     await tester.pumpAndSettle();
 
-    expect(find.text('阅读字体'), findsOneWidget);
+    expect(find.text('选择字体'), findsOneWidget);
     expect(find.text('系统字体'), findsOneWidget);
-    expect(find.text('系统默认'), findsOneWidget);
-    expect(
-      find.textContaining('English: Reading changes life'),
-      findsNWidgets(3),
-    );
+    expect(find.textContaining('永Aa'), findsWidgets);
   });
 
   testWidgets(
@@ -563,25 +589,33 @@ void main() {
       CupertinoApp(
         home: ReaderPage(
           initialState: const ReadingState(mode: 'page'),
-          book: const ImportedBook(
+          book: ImportedBook(
             title: '下拉书签',
             format: BookFormat.txt,
-            paragraphs: ['可添加书签的正文'],
+            paragraphs: List<String>.generate(
+              9,
+              (index) => '第 ${index + 1} 段可添加书签的正文',
+            ),
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    // Quick vertical flick — long-press selection drags must not bookmark.
+    final pageView = tester.widget<PageView>(find.byType(PageView));
+    expect(pageView.controller?.page?.round(), 0);
+
+    // A slight diagonal must still belong to the downward bookmark pull,
+    // never to the horizontal PageView.
     await tester.timedDragFrom(
       const Offset(400, 300),
-      const Offset(0, 220),
+      const Offset(30, 220),
       const Duration(milliseconds: 80),
     );
     await tester.pump();
 
     expect(find.text('书签已添加'), findsOneWidget);
+    expect(pageView.controller?.page?.round(), 0);
   });
   testWidgets('page mode navigates with left and right screen taps', (
     tester,

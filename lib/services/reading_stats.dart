@@ -15,7 +15,8 @@ class ReadingStats {
   final Map<String, int> dailySeconds;
   final Map<String, int> bookSeconds;
 
-  int get todaySeconds => dailySeconds[ReadingStatsService.dayKey(DateTime.now())] ?? 0;
+  int get todaySeconds =>
+      dailySeconds[ReadingStatsService.dayKey(DateTime.now())] ?? 0;
 
   ReadingStats copyWith({
     int? totalSeconds,

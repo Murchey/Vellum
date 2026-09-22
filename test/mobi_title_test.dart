@@ -36,14 +36,8 @@ void main() {
     });
 
     test('CJK metadata beats pinyin when filename is Chinese', () {
-      final cjk = MobiDecoder.titleScore(
-        '哈利·波特',
-        fileTitle: '哈利·波特',
-      );
-      final pinyin = MobiDecoder.titleScore(
-        'hali bote',
-        fileTitle: '哈利·波特',
-      );
+      final cjk = MobiDecoder.titleScore('哈利·波特', fileTitle: '哈利·波特');
+      final pinyin = MobiDecoder.titleScore('hali bote', fileTitle: '哈利·波特');
       expect(cjk, greaterThan(pinyin));
       expect(cjk, greaterThan(0));
     });
@@ -61,24 +55,13 @@ void main() {
 
   group('MOBI TOC title cleaning', () {
     test('strips tags, entities and filepos leftovers', () {
+      expect(MobiDecoder.cleanMobiTocTitle('<b>第一章</b>'), '第一章');
+      expect(MobiDecoder.cleanMobiTocTitle('第&nbsp;二&nbsp;章'), '第 二 章');
       expect(
-        MobiDecoder.cleanMobiTocTitle('<b>第一章</b>'),
-        '第一章',
-      );
-      expect(
-        MobiDecoder.cleanMobiTocTitle('第&nbsp;二&nbsp;章'),
-        '第 二 章',
-      );
-      expect(
-        MobiDecoder.cleanMobiTocTitle(
-          '<a filepos="000012345">第三章</a>',
-        ),
+        MobiDecoder.cleanMobiTocTitle('<a filepos="000012345">第三章</a>'),
         '第三章',
       );
-      expect(
-        MobiDecoder.cleanMobiTocTitle('&#31532;&#22235;&#31456;'),
-        '第四章',
-      );
+      expect(MobiDecoder.cleanMobiTocTitle('&#31532;&#22235;&#31456;'), '第四章');
     });
 
     test('flags dirty labels', () {

@@ -29,7 +29,7 @@ ReaderParagraph _paragraph(
   paragraphIndex: 0,
   fontSize: 19,
   fontFamily: 'Georgia',
-  lineSpacing: ReaderLineSpacing.comfortable,
+  lineSpacing: ReaderLineSpacing.standard,
   fontWeight: ReaderFontWeight.regular,
   ink: const Color(0xff111111),
   contextMenuBuilder: createReaderSelectionToolbar(
@@ -81,28 +81,24 @@ void main() {
     expect(_backgrounds(tester).where((color) => color != null), isEmpty);
   });
 
-  testWidgets('status bar shows the chapter line and remaining time', (
-    tester,
-  ) async {
+  testWidgets('status bar shows page number and battery only', (tester) async {
     const status = ReaderStatusBar(
-      progressLabel: '50%',
-      batteryLabel: '电量 80%',
-      chapterLabel: '第一章 夜雨 · 本章 50%',
-      remainingLabel: '剩余约 12 分钟',
+      pageLabel: '12 / 80',
+      batteryLabel: '80%',
+      surface: Color(0xffd7d7db),
     );
     await tester.pumpWidget(
       const CupertinoApp(home: CupertinoPageScaffold(child: status)),
     );
 
-    expect(
-      find.text(
-        '50% · 第一章 夜雨 · 本章 50% · 剩余约 12 分钟 · 电量 80%',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('12 / 80'), findsOneWidget);
+    expect(find.text('80%'), findsOneWidget);
+    // Chapter / remaining-time no longer clutter the bottom strip.
+    expect(find.textContaining('剩余'), findsNothing);
+    expect(find.textContaining('本章'), findsNothing);
   });
 
-  testWidgets('reader footer reports chapter progress and time left', (
+  testWidgets('reader running head shows the chapter at top left', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -111,7 +107,6 @@ void main() {
     await tester.pump();
 
     expect(find.textContaining('第一章 夜雨'), findsWidgets);
-    expect(find.textContaining('剩余约 1 分钟'), findsOneWidget);
   });
 
   test('eye care levels expose their warm-tint strength', () {
@@ -196,4 +191,3 @@ class ReaderParagraphHost extends StatelessWidget {
     child: SafeArea(child: SingleChildScrollView(child: child)),
   );
 }
-

@@ -11,8 +11,10 @@ List<MapEntry<int, String>> chapterEntries(ImportedBook book) {
   if (book.tocEntries.isNotEmpty) {
     final entries = book.tocEntries
         .map(
-          (entry) =>
-              MapEntry(entry.paragraphIndex, _pipeline.chapterTitle(entry.title)),
+          (entry) => MapEntry(
+            entry.paragraphIndex,
+            _pipeline.chapterTitle(entry.title),
+          ),
         )
         .where((entry) => entry.value.isNotEmpty)
         .toList();
@@ -72,9 +74,7 @@ List<MapEntry<int, String>> heuristicChapterEntries(List<String> paragraphs) {
 Map<int, int> chapterStartPages(
   List<MapEntry<int, String>> chapters,
   int Function(int paragraphIndex) pageForParagraph,
-) => {
-  for (final entry in chapters) entry.key: pageForParagraph(entry.key) + 1,
-};
+) => {for (final entry in chapters) entry.key: pageForParagraph(entry.key) + 1};
 
 /// 1-based page label for a chapter, marking estimates while paginating.
 String chapterPageLabel({

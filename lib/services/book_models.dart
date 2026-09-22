@@ -79,10 +79,9 @@ class ImportedBook {
 
   bool get hasContentLoaded =>
       paragraphs.isNotEmpty || (metaParagraphCount ?? 0) == 0;
-  int get paragraphCount =>
-      paragraphs.isNotEmpty
-          ? paragraphs.length
-          : (catalog?.totalParagraphs ?? metaParagraphCount ?? 0);
+  int get paragraphCount => paragraphs.isNotEmpty
+      ? paragraphs.length
+      : (catalog?.totalParagraphs ?? metaParagraphCount ?? 0);
   String get storageId => id ?? BookLibraryIds.forBook(this);
 
   ImportedBook copyWith({

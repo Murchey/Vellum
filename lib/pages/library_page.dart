@@ -15,8 +15,7 @@ class LibraryPage extends StatefulWidget {
   final VoidCallback onImport;
   final ValueChanged<ImportedBook> onDelete;
   final ValueChanged<ImportedBook>? onEditCover;
-  final Future<void> Function(ImportedBook, String? folderId)?
-  onMoveToFolder;
+  final Future<void> Function(ImportedBook, String? folderId)? onMoveToFolder;
   final Future<void> Function(String name)? onCreateFolder;
   final Future<void> Function(String folderId)? onDeleteFolder;
   final Future<void> Function(String folderId, String name)? onRenameFolder;
@@ -94,9 +93,7 @@ class _LibraryPageState extends State<LibraryPage> {
       builder: (ctx) => _FolderPickerSheet(
         title: '移动到文件夹',
         folders: widget.folders,
-        extraActionLabel: widget.onCreateFolder == null
-            ? null
-            : '新建文件夹…',
+        extraActionLabel: widget.onCreateFolder == null ? null : '新建文件夹…',
         onExtraAction: () {
           Navigator.pop(ctx);
           _promptCreateFolder(book);
@@ -232,7 +229,10 @@ class _LibraryPageState extends State<LibraryPage> {
     final showEmptySearch = !showEmptyLibrary && filtered.isEmpty;
 
     return CupertinoPageScaffold(
+      backgroundColor: VellumTheme.shellOf(context),
       navigationBar: CupertinoNavigationBar(
+        backgroundColor: VellumTheme.shellOf(context),
+        border: null,
         middle: const Text('书库'),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
@@ -287,9 +287,7 @@ class _LibraryPageState extends State<LibraryPage> {
                               ? '这个文件夹里还没有书。'
                               : '没有找到与「${_query.trim()}」相关的书',
                           textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: VellumTheme.mutedOf(context),
-                          ),
+                          style: TextStyle(color: VellumTheme.mutedOf(context)),
                         ),
                       ),
                     )
@@ -336,7 +334,9 @@ class _LibraryPageState extends State<LibraryPage> {
         child: Text(
           label,
           style: TextStyle(
-            color: selected ? CupertinoColors.white : VellumTheme.inkOf(context),
+            color: selected
+                ? CupertinoColors.white
+                : VellumTheme.inkOf(context),
             fontSize: 13,
           ),
         ),
@@ -421,4 +421,3 @@ class _FolderPickerSheet extends StatelessWidget {
         onTap: onTap,
       );
 }
-

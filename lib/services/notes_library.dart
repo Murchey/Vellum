@@ -81,8 +81,7 @@ class NotesLibrary {
       if (raw is! List<dynamic>) return const [];
       final notes = <ReadingNote>[
         for (final entry in raw)
-          if (entry is Map<String, dynamic>)
-            ReadingNote.fromJson(entry),
+          if (entry is Map<String, dynamic>) ReadingNote.fromJson(entry),
       ];
       notes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return notes;

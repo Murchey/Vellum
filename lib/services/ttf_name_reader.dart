@@ -1,6 +1,18 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+/// Resolves the font label exposed to the user.
+///
+/// The TTF/OTF internal `name` table is authoritative. The filename is used
+/// only when that metadata is missing, invalid, or empty.
+String resolveImportedFontDisplayName({
+  required Uint8List bytes,
+  required String filename,
+}) {
+  final internalName = readTtfDisplayName(bytes)?.trim();
+  return (internalName?.isNotEmpty ?? false) ? internalName! : filename;
+}
+
 /// Reads the human-readable font name from a TTF/OTF `name` table.
 /// Prefers Full name (ID 4), then Typographic Family (16), then Family (1).
 String? readTtfDisplayName(Uint8List bytes) {

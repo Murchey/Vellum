@@ -1,6 +1,7 @@
-﻿import 'package:flutter/cupertino.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Scrollbar;
 
+import '../services/library_models.dart';
 import '../services/notes_library.dart';
 import '../theme/vellum_theme.dart';
 import 'reader_models.dart';
@@ -50,10 +51,19 @@ class ReaderDirectoryPanel extends StatefulWidget {
 
 class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
   var _tab = 0;
+
+  /// Fanqie-style catalog order toggle (正序/倒序).
+  var _descending = false;
   final _scrollController = ScrollController();
   var _didAutoScroll = false;
 
   static const double itemExtent = ReaderDirectoryPanel.itemExtent;
+
+  List<MapEntry<int, String>> get _entries {
+    final raw = _tab == 0 ? widget.chapters : widget.bookmarks;
+    if (!_descending || raw.isEmpty) return raw;
+    return raw.reversed.toList(growable: false);
+  }
 
   @override
   void initState() {
@@ -67,15 +77,29 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     super.dispose();
   }
 
+  void _toggleOrder() {
+    setState(() {
+      _descending = !_descending;
+      _didAutoScroll = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoScrollToCurrent());
+  }
+
+  /// Current chapter in the *displayed* list order (handles 倒序).
   bool _isCurrentChapter(
     int paragraphIndex,
     int index,
     List<MapEntry<int, String>> entries,
   ) {
     final current = widget.currentParagraph;
-    final next = index + 1 < entries.length
-        ? entries[index + 1].key
-        : 1 << 30;
+    if (_descending) {
+      // Displayed[i] is original[n-1-i]. Range is (prevDisplay.key, this.key]
+      // inverted: current is in this chapter when
+      // current >= this.key && (next display is smaller chapter start OR last).
+      final higherNeighbor = index > 0 ? entries[index - 1].key : 1 << 30;
+      return current >= paragraphIndex && current < higherNeighbor;
+    }
+    final next = index + 1 < entries.length ? entries[index + 1].key : 1 << 30;
     return current >= paragraphIndex && current < next;
   }
 
@@ -106,14 +130,25 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
 
   void _autoScrollToCurrent() {
     if (_didAutoScroll || !_scrollController.hasClients) return;
-    final entries = _tab == 0 ? widget.chapters : widget.bookmarks;
+    final entries = _entries;
     if (entries.isEmpty) return;
     var target = 0;
-    for (var i = 0; i < entries.length; i++) {
-      if (entries[i].key <= widget.currentParagraph) {
-        target = i;
-      } else {
-        break;
+    if (_descending) {
+      // Reverse list: unread later chapters sit first; current is the first
+      // entry whose start is <= currentParagraph.
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].key <= widget.currentParagraph) {
+          target = i;
+          break;
+        }
+      }
+    } else {
+      for (var i = 0; i < entries.length; i++) {
+        if (entries[i].key <= widget.currentParagraph) {
+          target = i;
+        } else {
+          break;
+        }
       }
     }
     _didAutoScroll = true;
@@ -122,11 +157,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     _scrollController.jumpTo(offset);
   }
 
-  String _secondaryLabel(
-    int paragraphIndex,
-    bool isCurrent,
-    bool isRead,
-  ) {
+  String _secondaryLabel(int paragraphIndex, bool isCurrent, bool isRead) {
     if (_tab == 1) return '第 ${paragraphIndex + 1} 段';
     if (_tab == 2) return '';
     return _readStateLabel(paragraphIndex, isCurrent, isRead);
@@ -139,8 +170,8 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     final surface = widget.surface ?? VellumTheme.readerChromeOf(context);
     final ink = VellumTheme.readerChromeInk(surface);
     final muted = ink.withValues(alpha: .55);
-    final accent = VellumTheme.accentOf(context);
-    final entries = _tab == 0 ? widget.chapters : widget.bookmarks;
+    final accent = VellumTheme.readerAccentOf(context);
+    final entries = _entries;
     final emptyMessage = switch (_tab) {
       0 => '这本书暂未识别出章节标题。',
       1 => '下拉阅读页面即可添加书签。',
@@ -158,10 +189,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
               widget.bookTitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: ink.withValues(alpha: .45),
-                fontSize: 14,
-              ),
+              style: TextStyle(color: ink.withValues(alpha: .45), fontSize: 14),
             ),
           ),
 
@@ -170,11 +198,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Row(
             children: [
-              for (final (index, label) in [
-                (0, '目录'),
-                (1, '书签'),
-                (2, '笔记'),
-              ])
+              for (final (index, label) in [(0, '目录'), (1, '书签'), (2, '笔记')])
                 Padding(
                   padding: const EdgeInsets.only(right: 24),
                   child: GestureDetector(
@@ -202,15 +226,22 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
                   ),
                 ),
               const Spacer(),
+              // Fanqie catalog order toggle.
+              if (_tab == 0)
+                CupertinoButton(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(52, 44),
+                  onPressed: _toggleOrder,
+                  child: Text(
+                    _descending ? '倒序' : '正序',
+                    style: TextStyle(color: accent, fontSize: 13),
+                  ),
+                ),
               CupertinoButton(
                 padding: EdgeInsets.zero,
                 minimumSize: const Size(44, 44),
                 onPressed: widget.onClose,
-                child: Icon(
-                  CupertinoIcons.clear,
-                  size: 20,
-                  color: muted,
-                ),
+                child: Icon(CupertinoIcons.clear, size: 20, color: muted),
               ),
             ],
           ),
@@ -368,7 +399,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: ink,
-                backgroundColor: VellumTheme.accentOf(
+                backgroundColor: VellumTheme.readerAccentOf(
                   context,
                 ).withValues(alpha: .18),
               ),
@@ -466,8 +497,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
 
   bool get _followsSystem => widget.brightness < 0;
 
-  Color get _surface =>
-      widget.surface ?? VellumTheme.readerChromeOf(context);
+  Color get _surface => widget.surface ?? VellumTheme.readerChromeOf(context);
   Color get _ink => VellumTheme.readerChromeInk(_surface);
   Color get _muted => _ink.withValues(alpha: .55);
 
@@ -481,9 +511,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
-          children: _showMore
-              ? _moreSettings(context)
-              : _mainSettings(context),
+          children: _showMore ? _moreSettings(context) : _mainSettings(context),
         ),
       ),
     );
@@ -495,7 +523,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     required ValueChanged<T> onChanged,
   }) {
     final ink = _ink;
-    final accent = VellumTheme.accentOf(context);
+    final accent = VellumTheme.readerAccentOf(context);
     final surface = _surface;
     return Container(
       height: 36,
@@ -552,10 +580,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       surface: _surface,
       child: _optionGroup<ReadingMode>(
         groupValue: widget.readingMode,
-        options: const {
-          ReadingMode.scroll: '上下滚动',
-          ReadingMode.page: '左右翻页',
-        },
+        options: const {ReadingMode.scroll: '上下滚动', ReadingMode.page: '左右翻页'},
         onChanged: widget.onReadingMode,
       ),
     ),
@@ -601,7 +626,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: widget.background == color
-                        ? VellumTheme.accentOf(context)
+                        ? VellumTheme.readerAccentOf(context)
                         : _ink.withValues(alpha: .2),
                     width: widget.background == color ? 2 : 1,
                   ),
@@ -626,11 +651,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
                 style: TextStyle(fontSize: 13, color: _muted),
               ),
             ),
-            Icon(
-              CupertinoIcons.chevron_forward,
-              size: 16,
-              color: _muted,
-            ),
+            Icon(CupertinoIcons.chevron_forward, size: 16, color: _muted),
           ],
         ),
       ),
@@ -656,16 +677,9 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                '更多设置',
-                style: TextStyle(fontSize: 13, color: _ink),
-              ),
+              child: Text('更多设置', style: TextStyle(fontSize: 13, color: _ink)),
             ),
-            Icon(
-              CupertinoIcons.chevron_forward,
-              size: 16,
-              color: _muted,
-            ),
+            Icon(CupertinoIcons.chevron_forward, size: 16, color: _muted),
           ],
         ),
       ),
@@ -696,9 +710,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       surface: _surface,
       child: _optionGroup<ReaderEyeCare>(
         groupValue: widget.eyeCare,
-        options: {
-          for (final level in ReaderEyeCare.values) level: level.label,
-        },
+        options: {for (final level in ReaderEyeCare.values) level: level.label},
         onChanged: widget.onEyeCare,
       ),
     ),
@@ -726,23 +738,25 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           minimumSize: const Size(36, 36),
-          onPressed: () =>
-              widget.onFontSize((widget.fontSize - 1).clamp(16, 36)),
+          onPressed: () => widget.onFontSize(
+            (widget.fontSize - 1).clamp(kReaderFontMin, kReaderFontMax),
+          ),
           child: Text('A−', style: TextStyle(fontSize: 14, color: _ink)),
         ),
         Expanded(
           child: CupertinoSlider(
-            value: widget.fontSize.clamp(16, 36),
-            min: 16,
-            max: 36,
+            value: widget.fontSize.clamp(kReaderFontMin, kReaderFontMax),
+            min: kReaderFontMin,
+            max: kReaderFontMax,
             onChanged: widget.onFontSize,
           ),
         ),
         CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 6),
           minimumSize: const Size(36, 36),
-          onPressed: () =>
-              widget.onFontSize((widget.fontSize + 1).clamp(16, 36)),
+          onPressed: () => widget.onFontSize(
+            (widget.fontSize + 1).clamp(kReaderFontMin, kReaderFontMax),
+          ),
           child: Text('A+', style: TextStyle(fontSize: 14, color: _ink)),
         ),
         SizedBox(
@@ -776,7 +790,9 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           _followsSystem ? '跟随系统' : '恢复跟随',
           style: TextStyle(
             fontSize: 12,
-            color: _followsSystem ? _muted : VellumTheme.accentOf(context),
+            color: _followsSystem
+                ? _muted
+                : VellumTheme.readerAccentOf(context),
           ),
         ),
       ),
@@ -795,10 +811,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     child: Row(
       children: [
         Expanded(
-          child: Text(
-            detail,
-            style: TextStyle(fontSize: 12, color: _muted),
-          ),
+          child: Text(detail, style: TextStyle(fontSize: 12, color: _muted)),
         ),
         CupertinoSwitch(value: value, onChanged: onChanged),
       ],
@@ -836,14 +849,10 @@ class ReaderPanelTitle extends StatelessWidget {
               padding: EdgeInsets.zero,
               minimumSize: const Size(40, 36),
               onPressed: onBack,
-              child: Icon(
-                CupertinoIcons.chevron_back,
-                size: 20,
-                color: muted,
-              ),
+              child: Icon(CupertinoIcons.chevron_back, size: 20, color: muted),
             )
           else
-            Icon(icon, size: 18, color: VellumTheme.accentOf(context)),
+            Icon(icon, size: 18, color: VellumTheme.readerAccentOf(context)),
           const SizedBox(width: 8),
           Text(
             title,
@@ -883,17 +892,14 @@ class ReaderSettingRow extends StatelessWidget {
     final bg = surface ?? VellumTheme.readerChromeOf(context);
     final muted = VellumTheme.readerChromeInk(bg).withValues(alpha: .55);
     return Padding(
-      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
       child: SizedBox(
-        height: 40,
+        height: 36,
         child: Row(
           children: [
             SizedBox(
               width: 56,
-              child: Text(
-                label,
-                style: TextStyle(color: muted, fontSize: 12),
-              ),
+              child: Text(label, style: TextStyle(color: muted, fontSize: 12)),
             ),
             const SizedBox(width: 10),
             Expanded(child: child),

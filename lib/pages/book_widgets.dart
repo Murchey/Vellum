@@ -85,166 +85,168 @@ class BookGridCard extends StatelessWidget {
     return GestureDetector(
       onLongPress: onLongPress,
       child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: CupertinoButton(
-                  padding: EdgeInsets.zero,
-                  onPressed: onTap,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: VellumTheme.lineOf(context),
-                        width: 1,
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: [
-                        BoxShadow(
-                          color: CupertinoColors.black.withValues(alpha: .06),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: onTap,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: VellumTheme.lineOf(context),
+                          width: 1,
                         ),
-                      ],
-                    ),
-                    position: DecorationPosition.foreground,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(9),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          book.coverBytes == null
-                              ? DefaultCover(book: book)
-                              : Image.memory(
-                                  book.coverBytes!,
-                                  fit: BoxFit.cover,
-                                  cacheWidth: 640,
-                                  errorBuilder: (_, _, _) =>
-                                      DefaultCover(book: book),
-                                ),
-                          // Fanqie shows reading progress on the cover itself.
-                          if (percent > 0)
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    begin: Alignment.topCenter,
-                                    end: Alignment.bottomCenter,
-                                    colors: [
-                                      CupertinoColors.black.withValues(
-                                        alpha: 0,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: [
+                          BoxShadow(
+                            color: CupertinoColors.black.withValues(alpha: .06),
+                            blurRadius: 12,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      position: DecorationPosition.foreground,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(9),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            book.coverBytes == null
+                                ? DefaultCover(book: book)
+                                : Image.memory(
+                                    book.coverBytes!,
+                                    fit: BoxFit.cover,
+                                    cacheWidth: 640,
+                                    errorBuilder: (_, _, _) =>
+                                        DefaultCover(book: book),
+                                  ),
+                            // Fanqie shows reading progress on the cover itself.
+                            if (percent > 0)
+                              Align(
+                                alignment: Alignment.bottomCenter,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 3,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topCenter,
+                                      end: Alignment.bottomCenter,
+                                      colors: [
+                                        CupertinoColors.black.withValues(
+                                          alpha: 0,
+                                        ),
+                                        CupertinoColors.black.withValues(
+                                          alpha: .55,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(
+                                            2,
+                                          ),
+                                          child: LinearProgressIndicator(
+                                            value: progress.clamp(0.0, 1.0),
+                                            minHeight: 3,
+                                            backgroundColor: CupertinoColors
+                                                .white
+                                                .withValues(alpha: .25),
+                                            valueColor: AlwaysStoppedAnimation(
+                                              accent,
+                                            ),
+                                          ),
+                                        ),
                                       ),
-                                      CupertinoColors.black.withValues(
-                                        alpha: .55,
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '$percent%',
+                                        style: const TextStyle(
+                                          color: CupertinoColors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: ClipRRect(
-                                        borderRadius:
-                                            BorderRadius.circular(2),
-                                        child: LinearProgressIndicator(
-                                          value: progress.clamp(0.0, 1.0),
-                                          minHeight: 3,
-                                          backgroundColor:
-                                              CupertinoColors.white
-                                                  .withValues(alpha: .25),
-                                          valueColor:
-                                              AlwaysStoppedAnimation(accent),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '$percent%',
-                                      style: const TextStyle(
-                                        color: CupertinoColors.white,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              Positioned(
-                top: 6,
-                right: 6,
-                child: CupertinoButton(
-                  padding: const EdgeInsets.all(6),
-                  minimumSize: const Size(30, 30),
-                  onPressed: onDelete,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: CupertinoColors.systemGrey6.resolveFrom(context),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: VellumTheme.lineOf(context),
-                        width: .8,
+                Positioned(
+                  top: 6,
+                  right: 6,
+                  child: CupertinoButton(
+                    padding: const EdgeInsets.all(6),
+                    minimumSize: const Size(30, 30),
+                    onPressed: onDelete,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: CupertinoColors.systemGrey6.resolveFrom(context),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: VellumTheme.lineOf(context),
+                          width: .8,
+                        ),
                       ),
-                    ),
-                    child: const Icon(
-                      CupertinoIcons.delete,
-                      color: CupertinoColors.systemRed,
-                      size: 15,
+                      child: const Icon(
+                        CupertinoIcons.delete,
+                        color: CupertinoColors.systemRed,
+                        size: 15,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          book.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: VellumTheme.inkOf(context),
-            fontFamily: VellumTheme.fontFamily,
-            fontSize: 13,
-            height: 1.25,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          metaLine,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          textAlign: TextAlign.center,
-          style: TextStyle(color: muted, fontSize: 11),
-        ),
-        if (percent > 0)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              '已读 $percent%',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: accent,
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-              ),
+              ],
             ),
           ),
-      ],
+          const SizedBox(height: 8),
+          Text(
+            book.title,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: VellumTheme.inkOf(context),
+              fontFamily: VellumTheme.fontFamily,
+              fontSize: 13,
+              height: 1.25,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            metaLine,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, fontSize: 11),
+          ),
+          if (percent > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                '已读 $percent%',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -363,7 +365,8 @@ class BookRow extends StatelessWidget {
 }
 
 class CoverThumb extends StatelessWidget {
-  const CoverThumb({super.key,
+  const CoverThumb({
+    super.key,
     required this.book,
     required this.width,
     required this.height,
