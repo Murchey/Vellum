@@ -25,6 +25,7 @@ class ReaderFontPickerSheet extends StatelessWidget {
     required this.activeFamily,
     required this.onSelectSystemFont,
     required this.onSelectImportedFont,
+    this.surface,
     super.key,
   });
 
@@ -33,11 +34,14 @@ class ReaderFontPickerSheet extends StatelessWidget {
   final ValueChanged<String> onSelectSystemFont;
   final Future<void> Function(InstalledFont) onSelectImportedFont;
 
+  /// Active reading paper. The sheet sits over the page, so its surface and
+  /// ink must follow the page's paper in light and dark themes alike.
+  final Color? surface;
+
   @override
   Widget build(BuildContext context) {
-    final ink = VellumTheme.readerChromeInk(
-      VellumTheme.readerChromeOf(context),
-    );
+    final bg = surface ?? VellumTheme.readerChromeOf(context);
+    final ink = VellumTheme.readerChromeInk(bg);
     final muted = ink.withValues(alpha: .55);
     final accent = VellumTheme.readerAccentOf(context);
     final itemCount = fanqieReaderFonts.length + installedFonts.length;
@@ -46,7 +50,7 @@ class ReaderFontPickerSheet extends StatelessWidget {
         maxHeight: MediaQuery.sizeOf(context).height * .78,
       ),
       decoration: BoxDecoration(
-        color: VellumTheme.readerChromeOf(context),
+        color: bg,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
       ),
       child: SafeArea(
@@ -111,7 +115,7 @@ class ReaderFontPickerSheet extends StatelessWidget {
                     muted: muted,
                     accent: accent,
                     ink: ink,
-                    custom: FontPreview(font: font, compact: true),
+                    custom: FontPreview(font: font, compact: true, ink: muted),
                     onTap: () => onSelectImportedFont(font),
                   );
                 },

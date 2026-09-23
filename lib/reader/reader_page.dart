@@ -943,6 +943,7 @@ class _ReaderPageState extends State<ReaderPage>
         ? (armed ? '松开取消书签' : '下拉取消书签')
         : (armed ? '松开添加书签' : '下拉添加书签');
     return BookmarkRibbon(
+      surface: _backgroundFor(context),
       progress: progress,
       armed: armed,
       alreadyBookmarked: already,
@@ -1296,7 +1297,8 @@ class _ReaderPageState extends State<ReaderPage>
               if (_isCurrentViewBookmarked)
                 Semantics(
                   label: '当前阅读页面已添加书签',
-                  child: const BookmarkRibbon(
+                  child: BookmarkRibbon(
+                    surface: _backgroundFor(context),
                     progress: 1,
                     armed: false,
                     alreadyBookmarked: true,
@@ -1544,6 +1546,7 @@ class _ReaderPageState extends State<ReaderPage>
     showCupertinoModalPopup<void>(
       context: context,
       builder: (ctx) => ReaderFontPickerSheet(
+        surface: _backgroundFor(context),
         installedFonts: widget.installedFonts,
         activeFamily: _readerFontFamily,
         onSelectSystemFont: (family) {

@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vellum/reader/reader_chrome.dart';
+import 'package:vellum/theme/vellum_theme.dart';
 
 void main() {
   testWidgets(
@@ -29,4 +30,48 @@ void main() {
       expect(ribbon.height, greaterThan(60));
     },
   );
+
+  testWidgets('pull caption follows the active reading paper', (tester) async {
+    for (final surface in [
+      VellumTheme.readerWhite,
+      VellumTheme.readerSepia,
+      VellumTheme.readerNight,
+      VellumTheme.readerCharcoal,
+    ]) {
+      await tester.pumpWidget(
+        CupertinoApp(
+          home: SizedBox.expand(
+            child: BookmarkRibbon(
+              surface: surface,
+              progress: 1,
+              armed: false,
+              alreadyBookmarked: false,
+              label: '下拉添加书签',
+            ),
+          ),
+        ),
+      );
+
+      final ink = VellumTheme.readerChromeInk(surface);
+      final pill = tester.widget<Container>(
+        find
+            .descendant(
+              of: find.byType(BookmarkRibbon),
+              matching: find.byType(Container),
+            )
+            .last,
+      );
+      final decoration = pill.decoration! as BoxDecoration;
+      expect(
+        decoration.color,
+        surface.withValues(alpha: .94),
+        reason: 'caption pill must sit on the active paper $surface',
+      );
+      expect(
+        (decoration.border! as Border).top.color,
+        ink.withValues(alpha: .18),
+      );
+      expect(tester.widget<Text>(find.text('下拉添加书签')).style!.color, ink);
+    }
+  });
 }

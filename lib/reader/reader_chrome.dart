@@ -193,6 +193,7 @@ class BookmarkRibbon extends StatelessWidget {
     required this.label,
     this.pinned = false,
     this.showLabel = true,
+    this.surface,
     super.key,
   });
 
@@ -207,8 +208,14 @@ class BookmarkRibbon extends StatelessWidget {
   /// Pull feedback has a caption; the persistent tab intentionally does not.
   final bool showLabel;
 
+  /// Active reading paper. The caption pill floats over the page, so its
+  /// surface, hairline and ink must follow that paper in light and dark.
+  final Color? surface;
+
   @override
   Widget build(BuildContext context) {
+    final bg = surface ?? VellumTheme.readerChromeOf(context);
+    final ink = VellumTheme.readerChromeInk(bg);
     final accent = VellumTheme.readerAccentOf(context);
     final ribbonLength = (pinned ? 72.0 : 28 + progress * 52).clamp(28.0, 90.0);
     final ribbonColor = pinned
@@ -217,7 +224,7 @@ class BookmarkRibbon extends StatelessWidget {
               ? accent
               : (alreadyBookmarked
                     ? accent.withValues(alpha: .55)
-                    : VellumTheme.mutedOf(context).withValues(alpha: .7)));
+                    : ink.withValues(alpha: .45)));
     return IgnorePointer(
       child: SafeArea(
         child: Align(
@@ -257,20 +264,18 @@ class BookmarkRibbon extends StatelessWidget {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: VellumTheme.readerChromeOf(
-                        context,
-                      ).withValues(alpha: .94),
+                      color: bg.withValues(alpha: .94),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: armed
                             ? accent.withValues(alpha: .55)
-                            : VellumTheme.lineOf(context),
+                            : ink.withValues(alpha: .18),
                       ),
                     ),
                     child: Text(
                       label,
                       style: TextStyle(
-                        color: armed ? accent : VellumTheme.inkOf(context),
+                        color: armed ? accent : ink,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),

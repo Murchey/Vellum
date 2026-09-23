@@ -7,10 +7,19 @@ import '../services/book_library.dart';
 /// when it is selected. The preview binds that family before loading finishes;
 /// Flutter replaces the fallback glyphs as soon as [FontLoader] completes.
 class FontPreview extends StatefulWidget {
-  const FontPreview({required this.font, this.compact = false, super.key});
+  const FontPreview({
+    required this.font,
+    this.compact = false,
+    this.ink,
+    super.key,
+  });
 
   final InstalledFont font;
   final bool compact;
+
+  /// Preview ink. Defaults to the ambient theme text color; the reader font
+  /// picker passes the active paper's ink so night/charcoal papers stay right.
+  final Color? ink;
 
   @override
   State<FontPreview> createState() => _FontPreviewState();
@@ -47,7 +56,8 @@ class _FontPreviewState extends State<FontPreview> {
 
   @override
   Widget build(BuildContext context) {
-    final color = CupertinoTheme.of(context).textTheme.textStyle.color;
+    final color =
+        widget.ink ?? CupertinoTheme.of(context).textTheme.textStyle.color;
     if (widget.compact) {
       return Row(
         mainAxisSize: MainAxisSize.min,

@@ -142,8 +142,11 @@ class ReaderParagraph extends StatelessWidget {
         ? (plain.trim().length <= 28 ? TextAlign.center : TextAlign.start)
         : isCenter
         ? TextAlign.center
-        // Body text is justified so the right edge stays even.
-        : TextAlign.justify;
+        // Natural start alignment, never `TextAlign.justify`: justified
+        // (non-last) lines hang their leading whitespace, which silently
+        // deletes the `　　` two-em first-line indent on every paragraph
+        // that wraps to two or more lines. CJK lines fill evenly anyway.
+        : TextAlign.start;
     final span = TextSpan(style: textStyle, children: spans);
     final text = selectable
         ? SelectableText.rich(

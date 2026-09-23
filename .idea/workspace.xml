@@ -6,63 +6,15 @@
   <component name="ChangeListManager">
     <list default="true" id="d06d7fbd-f527-471e-9b91-d12b0b4e9b10" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/app.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/book_widgets.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/book_widgets.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/cover_editor_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/cover_editor_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/ebook_to_txt_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/ebook_to_txt_page.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/font_manager_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/font_manager_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/home_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/home_page.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/library_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/library_page.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/reading_stats_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/reading_stats_page.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/settings_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/settings_page.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/update_sheet.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/update_sheet.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/pages/writing_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/pages/writing_page.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/lib/reader/reader_chrome.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_chrome.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_control_panels.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_control_panels.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_controls.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_controls.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/lib/reader/reader_font_picker.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_font_picker.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_gestures.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_gestures.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_markup.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_markup.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_models.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_models.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/lib/reader/reader_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_page.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_pagination.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_pagination.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/lib/reader/reader_paragraph.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_paragraph.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_platform.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_platform.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_selection.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_selection.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/reader/reader_toc.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_toc.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/book_importer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/book_importer.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/book_library.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/book_library.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/book_models.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/book_models.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/epub_decoder.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/epub_decoder.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/font_storage.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/font_storage.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/html_text_pipeline.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/html_text_pipeline.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/library_models.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/library_models.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/mobi_decoder.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/mobi_decoder.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/notes_library.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/notes_library.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/reading_stats.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/reading_stats.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/ttf_name_reader.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/ttf_name_reader.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/txt_catalog.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/txt_catalog.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/txt_seek_source.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/txt_seek_source.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/vellum_update_installer.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/vellum_update_installer.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/vellum_update_service.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/vellum_update_service.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/services/writing_library.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/writing_library.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/theme/vellum_theme.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/theme/vellum_theme.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/conversion_progress.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/conversion_progress.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/lib/widgets/font_preview.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/font_preview.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/lib/widgets/markdown_preview.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/markdown_preview.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/book_id_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/book_id_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/book_import_pipeline_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/book_import_pipeline_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/book_importer_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/book_importer_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/catalog_read_state_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/catalog_read_state_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/ebook_to_txt_page_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/ebook_to_txt_page_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/mobi_title_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/mobi_title_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/_diag_menu.dart" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/font_picker_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/font_picker_test.dart" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/test/paragraph_indent_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/paragraph_indent_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/progressive_pagination_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/progressive_pagination_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/reader_highlights_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/reader_highlights_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/toc_title_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/toc_title_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/update_service_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/update_service_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/widget_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/widget_test.dart" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/test/writing_preview_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/writing_preview_test.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/reader_bookmark_chrome_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/reader_bookmark_chrome_test.dart" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
