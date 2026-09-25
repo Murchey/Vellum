@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notification action icons for the listening (听书) foreground service. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M16,5 L18,5 L18,19 L16,19 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M6,5 L15,12 L6,19 Z" />
+</vector>

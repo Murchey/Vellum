@@ -162,6 +162,7 @@ class ReadingState {
     this.eyeCare = 'off',
     this.keepScreenOn = true,
     this.volumeKeys = false,
+    this.chapterPositions = const {},
   });
 
   final double fontSize;
@@ -186,6 +187,7 @@ class ReadingState {
   final String eyeCare;
   final bool keepScreenOn;
   final bool volumeKeys;
+  final Map<int, ChapterReadingPosition> chapterPositions;
 
   ReadingState copyWith({String? bookId}) => ReadingState(
     fontSize: fontSize,
@@ -204,6 +206,7 @@ class ReadingState {
     eyeCare: eyeCare,
     keepScreenOn: keepScreenOn,
     volumeKeys: volumeKeys,
+    chapterPositions: chapterPositions,
   );
 
   Map<String, dynamic> toJson() => {
@@ -223,6 +226,10 @@ class ReadingState {
     'eyeCare': eyeCare,
     'keepScreenOn': keepScreenOn,
     'volumeKeys': volumeKeys,
+    'chapterPositions': {
+      for (final entry in chapterPositions.entries)
+        entry.key.toString(): entry.value.toJson(),
+    },
   };
 
   factory ReadingState.fromJson(Map<String, dynamic> json) => ReadingState(
@@ -245,7 +252,48 @@ class ReadingState {
     eyeCare: json['eyeCare'] as String? ?? 'off',
     keepScreenOn: json['keepScreenOn'] as bool? ?? true,
     volumeKeys: json['volumeKeys'] as bool? ?? false,
+    chapterPositions: _chapterPositionsFromJson(json['chapterPositions']),
   );
+}
+
+class ChapterReadingPosition {
+  const ChapterReadingPosition({
+    this.position = 0,
+    this.page = 0,
+    this.paragraphIndex = 0,
+  });
+
+  final double position;
+  final int page;
+  final int paragraphIndex;
+
+  Map<String, dynamic> toJson() => {
+    'position': position,
+    'page': page,
+    'paragraphIndex': paragraphIndex,
+  };
+
+  factory ChapterReadingPosition.fromJson(Map<String, dynamic> json) =>
+      ChapterReadingPosition(
+        position: (json['position'] as num?)?.toDouble() ?? 0,
+        page: (json['page'] as num?)?.toInt() ?? 0,
+        paragraphIndex: (json['paragraphIndex'] as num?)?.toInt() ?? 0,
+      );
+}
+
+Map<int, ChapterReadingPosition> _chapterPositionsFromJson(Object? value) {
+  if (value is! Map) return const {};
+  final result = <int, ChapterReadingPosition>{};
+  for (final entry in value.entries) {
+    final key = int.tryParse(entry.key.toString());
+    final raw = entry.value;
+    if (key != null && raw is Map) {
+      result[key] = ChapterReadingPosition.fromJson(
+        Map<String, dynamic>.from(raw),
+      );
+    }
+  }
+  return result;
 }
 
 class StorageUsage {
@@ -253,13 +301,22 @@ class StorageUsage {
     required this.libraryBytes,
     required this.readingStateBytes,
     required this.fontBytes,
+    this.backgroundBytes = 0,
+    this.ttsBytes = 0,
   });
 
   final int libraryBytes;
   final int readingStateBytes;
   final int fontBytes;
 
-  int get totalBytes => libraryBytes + readingStateBytes + fontBytes;
+  /// Custom reading papers (backgrounds/).
+  final int backgroundBytes;
+
+  /// Cached speech audio (tts_audio/).
+  final int ttsBytes;
+
+  int get totalBytes =>
+      libraryBytes + readingStateBytes + fontBytes + backgroundBytes + ttsBytes;
 }
 
 class LibraryFolder {

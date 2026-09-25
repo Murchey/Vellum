@@ -29,15 +29,19 @@ abstract final class VellumTheme {
   static const darkMuted = Color(0xffa8a29e);
   static const darkLine = Color(0xff3a3530);
 
-  // Fanqie reader themes.
-  static const readerWhite = Color(0xffd7d7db);
-  static const readerSepia = Color(0xfff7e4cf);
-  static const readerMint = Color(0xffc9decb);
-  static const readerBlue = Color(0xffc2def0);
-  static const readerNight = Color(0xff262626);
+  // Fanqie STANDARD reader resources (ReaderBgColorType.STANDARD). The
+  // similarly named `*_theme_bg_light` resources are brightness variants,
+  // not the normal reading papers shown by the default background picker.
+  static const readerWhite = Color(0xfff6f6f6);
+  static const readerSepia = Color(0xffded9c5);
+  static const readerMint = Color(0xffd8e3cc);
+  static const readerBlue = Color(0xffccd8e3);
+  static const readerNight = Color(0xff0e0e0e);
   static const readerNightInk = Color(0xffb7b7b7);
   static const readerCharcoal = Color(0xff1a1a1a);
-  static const readerCharcoalInk = Color(0xff8c8c8c);
+  static const readerCharcoalInk = Color(0xff808080);
+  static const readerSoftBlack = Color(0xff262626);
+  static const readerSoftBlackInk = Color(0xff8c8c8c);
 
   /// Fanqie body ink on light papers is pure black.
   static const readerBodyInk = Color(0xff000000);
@@ -121,15 +125,37 @@ abstract final class VellumTheme {
   /// Fanqie body ink on a reader paper (pure black on light, #B7B7B7 night).
   static Color readerInkFor(Color background) {
     if (background == darkPaper) return CupertinoColors.white;
+    if (background == readerSepia) return const Color(0xff141000);
     if (background == readerNight) return readerNightInk;
     if (background == readerCharcoal) return readerCharcoalInk;
+    if (background == readerSoftBlack) return readerSoftBlackInk;
     return readerBodyInk;
+  }
+
+  /// Migrate papers persisted before the STANDARD Fanqie palette was restored.
+  /// Reading state stores raw ARGB values, so changing constants alone would
+  /// otherwise leave existing books on the old LIGHT resource variants.
+  static Color? normalizeReaderBackground(Color? background) {
+    if (background == null) return null;
+    return switch (background.toARGB32()) {
+      0xffd7d7db => readerWhite,
+      0xfff7e4cf => readerSepia,
+      0xffc9decb => readerMint,
+      0xffc2def0 => readerBlue,
+      // This used to be Vellum's first night swatch (Fanqie theme 5), whose
+      // actual STANDARD background is #0E0E0E.
+      0xff262626 => readerNight,
+      _ => background,
+    };
   }
 
   /// Secondary text on a reader paper (Fanqie `#66000000` body).
   static Color readerMutedInk(Color surface) {
     final ink = readerInkFor(surface);
-    final night = surface == readerNight || surface == readerCharcoal;
+    final night =
+        surface == readerNight ||
+        surface == readerCharcoal ||
+        surface == readerSoftBlack;
     return ink.withValues(alpha: night ? .55 : .4);
   }
 

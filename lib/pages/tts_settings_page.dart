@@ -1,0 +1,247 @@
+import 'dart:io';
+
+import 'package:flutter/cupertino.dart';
+import 'package:just_audio/just_audio.dart';
+
+import '../services/tts_client.dart';
+import '../services/tts_preferences.dart';
+import '../theme/vellum_theme.dart';
+
+/// Configuration page for the listen (听书) service.
+///
+/// Plain JSON storage on purpose: the app's promise is "data stays on this
+/// device", and the page says so next to the key field.
+class TtsSettingsPage extends StatefulWidget {
+  const TtsSettingsPage({super.key});
+
+  @override
+  State<TtsSettingsPage> createState() => _TtsSettingsPageState();
+}
+
+class _TtsSettingsPageState extends State<TtsSettingsPage> {
+  final _store = const TtsPreferencesStore();
+  TtsPreferences _prefs = const TtsPreferences();
+
+  final _baseUrlController = TextEditingController();
+  final _apiKeyController = TextEditingController();
+  final _modelController = TextEditingController();
+  final _voiceController = TextEditingController();
+  AudioPlayer? _testPlayer;
+  bool _testing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await _store.load();
+    if (!mounted) return;
+    setState(() {
+      _prefs = prefs;
+      _baseUrlController.text = prefs.baseUrl;
+      _apiKeyController.text = prefs.apiKey;
+      _modelController.text = prefs.model;
+      _voiceController.text = prefs.voice;
+    });
+  }
+
+  @override
+  void dispose() {
+    _testPlayer?.dispose();
+    _baseUrlController.dispose();
+    _apiKeyController.dispose();
+    _modelController.dispose();
+    _voiceController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _persist() async {
+    final prefs = _collect();
+    setState(() => _prefs = prefs);
+    await _store.save(prefs);
+  }
+
+  /// Current field values merged onto the selected provider.
+  TtsPreferences _collect() => _prefs.copyWith(
+    baseUrl: _baseUrlController.text.trim(),
+    apiKey: _apiKeyController.text.trim(),
+    model: _modelController.text.trim(),
+    voice: _voiceController.text.trim(),
+  );
+
+  Future<void> _testSpeech() async {
+    await _persist();
+    if (_prefs.apiKey.isEmpty) {
+      _message('请先填写 API Key。');
+      return;
+    }
+    setState(() => _testing = true);
+    try {
+      final bytes = await TtsClient.forPreferences(
+        _prefs,
+      ).synthesize('朗读设置成功，可以开始听书了。');
+      final file = File(
+        '${Directory.systemTemp.path}'
+        '${Platform.pathSeparator}vellum_tts_test.mp3',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+      await (_testPlayer ??= AudioPlayer()).setFilePath(file.path);
+      await _testPlayer!.play();
+      if (mounted) _message('连接成功，正在播放测试语音。');
+    } on TtsException catch (error) {
+      if (mounted) _message(error.userMessage);
+    } catch (error) {
+      if (mounted) _message('测试失败：$error');
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
+  }
+
+  Future<void> _message(String text) => showCupertinoDialog<void>(
+    context: context,
+    builder: (context) => CupertinoAlertDialog(
+      title: const Text('朗读服务'),
+      content: Text(text),
+      actions: [
+        CupertinoDialogAction(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('好'),
+        ),
+      ],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final pageBackground = CupertinoTheme.of(context).scaffoldBackgroundColor;
+    final muted = VellumTheme.mutedOf(context);
+    final accent = VellumTheme.accentOf(context);
+    final isAzure = _prefs.provider == TtsProvider.azure;
+
+    return CupertinoPageScaffold(
+      backgroundColor: pageBackground,
+      navigationBar: const CupertinoNavigationBar(middle: Text('朗读服务')),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+              child: Text(
+                '配置后即可在阅读页点「听书」，从当前页开始朗读；'
+                '语音会缓存在本机以省流量。Key 只保存在这台设备上。',
+                style: TextStyle(fontSize: 12, color: muted, height: 1.5),
+              ),
+            ),
+            CupertinoListSection.insetGrouped(
+              backgroundColor: pageBackground,
+              header: const Text('服务'),
+              children: [
+                CupertinoListTile(
+                  title: const Text('接口类型'),
+                  trailing: CupertinoSlidingSegmentedControl<TtsProvider>(
+                    groupValue: _prefs.provider,
+                    children: {
+                      for (final provider in TtsProvider.values)
+                        provider: Text(provider.label),
+                    },
+                    onValueChanged: (value) {
+                      if (value == null) return;
+                      setState(() => _prefs = _collect().copyWith(
+                        provider: value,
+                      ));
+                      _store.save(_collect());
+                    },
+                  ),
+                ),
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              backgroundColor: pageBackground,
+              header: const Text('连接'),
+              children: [
+                _field(
+                  '接口地址',
+                  _baseUrlController,
+                  isAzure ? 'eastasia 或完整 URL' : 'https://api.openai.com 或中转地址',
+                ),
+                _field('API Key', _apiKeyController, 'sk-…（只存本机）', obscure: true),
+                if (isAzure)
+                  _field('音色', _voiceController, 'zh-CN-XiaoxiaoNeural')
+                else ...[
+                  _field('模型', _modelController, 'tts-1 / cosyvoice-v1 …'),
+                  _field('音色', _voiceController, 'alloy / longxiaochun …'),
+                ],
+              ],
+            ),
+            CupertinoListSection.insetGrouped(
+              backgroundColor: pageBackground,
+              header: const Text('朗读'),
+              children: [
+                CupertinoListTile(
+                  title: const Text('语速'),
+                  additionalInfo: Text('×${_prefs.speed.toStringAsFixed(2)}'),
+                  trailing: SizedBox(
+                    width: 180,
+                    child: CupertinoSlider(
+                      value: _prefs.speed,
+                      min: 0.5,
+                      max: 2.0,
+                      onChanged: (value) {
+                        setState(() => _prefs = _prefs.copyWith(speed: value));
+                      },
+                      onChangeEnd: (_) => _store.save(_collect()),
+                    ),
+                  ),
+                ),
+                CupertinoListTile(
+                  title: const Text('测试朗读'),
+                  additionalInfo: _testing ? const Text('连接中…') : null,
+                  trailing: _testing
+                      ? const CupertinoActivityIndicator(radius: 9)
+                      : Icon(CupertinoIcons.play_circle, size: 26, color: accent),
+                  onTap: _testing ? null : _testSpeech,
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+              child: Text(
+                'OpenAI 兼容接口按合成音频计费、Azure 按朗读字符数计费，'
+                '请在服务商侧留意用量；同一本书的语音会缓存，重复听不重复计费。',
+                style: TextStyle(fontSize: 11, color: muted, height: 1.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _field(
+    String label,
+    TextEditingController controller,
+    String placeholder, {
+    bool obscure = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 13)),
+          const SizedBox(height: 6),
+          CupertinoTextField(
+            controller: controller,
+            placeholder: placeholder,
+            obscureText: obscure,
+            onChanged: (_) => _persist(),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          ),
+        ],
+      ),
+    );
+  }
+}

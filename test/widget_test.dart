@@ -40,7 +40,14 @@ void main() {
   });
 
   test('reader papers keep their exact requested text contrast', () {
-    // Fanqie ReaderCommonColor ink pairs (theme 5 / 7 night grays).
+    // Fanqie STANDARD reader resources + ReaderCommonColor ink pairs.
+    expect(VellumTheme.readerWhite, const Color(0xfff6f6f6));
+    expect(VellumTheme.readerSepia, const Color(0xffded9c5));
+    expect(VellumTheme.readerMint, const Color(0xffd8e3cc));
+    expect(VellumTheme.readerBlue, const Color(0xffccd8e3));
+    expect(VellumTheme.readerNight, const Color(0xff0e0e0e));
+    expect(VellumTheme.readerCharcoal, const Color(0xff1a1a1a));
+    expect(VellumTheme.readerSoftBlack, const Color(0xff262626));
     expect(
       VellumTheme.readerInkFor(VellumTheme.darkPaper),
       CupertinoColors.white,
@@ -55,10 +62,14 @@ void main() {
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerSepia),
-      VellumTheme.readerBodyInk,
+      const Color(0xff141000),
     );
     expect(
       VellumTheme.readerInkFor(VellumTheme.readerCharcoal),
+      const Color(0xff808080),
+    );
+    expect(
+      VellumTheme.readerInkFor(VellumTheme.readerSoftBlack),
       const Color(0xff8c8c8c),
     );
     expect(
@@ -73,6 +84,29 @@ void main() {
     expect(VellumTheme.readerAccent, const Color(0xfffa6725));
     // App shell keeps quiet wine so nav bars stay familiar.
     expect(VellumTheme.accent, const Color(0xffa33d2e));
+  });
+
+  test('legacy reader papers migrate to the standard Fanqie palette', () {
+    expect(
+      VellumTheme.normalizeReaderBackground(const Color(0xffd7d7db)),
+      VellumTheme.readerWhite,
+    );
+    expect(
+      VellumTheme.normalizeReaderBackground(const Color(0xfff7e4cf)),
+      VellumTheme.readerSepia,
+    );
+    expect(
+      VellumTheme.normalizeReaderBackground(const Color(0xffc9decb)),
+      VellumTheme.readerMint,
+    );
+    expect(
+      VellumTheme.normalizeReaderBackground(const Color(0xffc2def0)),
+      VellumTheme.readerBlue,
+    );
+    expect(
+      VellumTheme.normalizeReaderBackground(const Color(0xff262626)),
+      VellumTheme.readerNight,
+    );
   });
 
   testWidgets('switches application theme from inside the app', (tester) async {
@@ -178,6 +212,8 @@ void main() {
     expect(find.text('字号'), findsOneWidget);
     expect(find.text('亮度'), findsOneWidget);
     expect(find.text('背景'), findsOneWidget);
+    // Basic papers are on the first level; custom lives behind a jump button.
+    expect(find.text('自定义'), findsOneWidget);
     expect(find.text('字重'), findsNothing);
     expect(find.text('常亮'), findsNothing);
 
@@ -187,7 +223,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('字重'), findsOneWidget);
-    expect(find.text('护眼'), findsOneWidget);
+    // 护眼 moved into the background studio (paper / overlay / ink family).
+    expect(find.text('护眼'), findsNothing);
     expect(find.text('常亮'), findsOneWidget);
     expect(find.text('音量键'), findsOneWidget);
 
@@ -203,6 +240,23 @@ void main() {
     expect(find.text('阅读设置'), findsOneWidget);
     expect(find.text('阅读方式'), findsOneWidget);
     expect(find.text('字重'), findsNothing);
+
+    // Second level: image import, underlay, opacity, ink picker, eye-care.
+    await tester.ensureVisible(find.text('自定义'));
+    await tester.tap(find.text('自定义'));
+    await tester.pumpAndSettle();
+    expect(find.text('自定义背景'), findsOneWidget);
+    expect(find.text('背景图'), findsOneWidget);
+    expect(find.text('导入图片'), findsOneWidget);
+    expect(find.text('字体颜色'), findsOneWidget);
+    expect(find.text('护眼'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byType(ReaderSettingsPanel),
+        matching: find.byIcon(CupertinoIcons.chevron_back),
+      ),
+    );
+    await tester.pumpAndSettle();
     expect(find.byType(SelectableText), findsOneWidget);
   });
 
@@ -338,6 +392,20 @@ void main() {
     final restored = ReadingState.fromJson(state.toJson());
     expect(restored.bookmarks, [3, 18]);
     expect(restored.lineSpacing, 'relaxed');
+  });
+
+  test('persists independent chapter reading positions', () {
+    const state = ReadingState(
+      paragraphIndex: 120,
+      chapterPositions: {
+        0: ChapterReadingPosition(paragraphIndex: 12, position: 240),
+        100: ChapterReadingPosition(paragraphIndex: 118, position: 1880),
+      },
+    );
+    final restored = ReadingState.fromJson(state.toJson());
+    expect(restored.chapterPositions[0]?.paragraphIndex, 12);
+    expect(restored.chapterPositions[100]?.position, 1880);
+    expect(restored.chapterPositions, hasLength(2));
   });
 
   testWidgets('shows a red top marker for a bookmarked reader page', (

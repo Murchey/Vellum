@@ -1,0 +1,462 @@
+<!-- AI生成 -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>阅读页背景设置与朗读机制 · 代码建议</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<p data-aigc-mark="1" style="margin:0 0 8px;font-size:10px;line-height:1.3;color:#6b6560;font-weight:400;">AI生成</p>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="rail">00</div>
+    <div class="body-col">
+      <p class="kicker">Vellum · 本地书阅读页</p>
+      <h1>背景设置与朗读机制<br>代码级建议</h1>
+      <p class="standfirst">
+        依据 <code>D:\Projects\vibecoding\fanqieApk</code> 的解包成果（反编译代码、资源值与既往逆向报告），
+        就「阅读页背景设置（允许用户本地自定义）」与「朗读 UI / 机制」两块给出可直接落地的代码建议。
+        无须启动模拟器 —— 本页即建议本身，内含两个可点的机制演示。
+      </p>
+      <ul class="chips">
+        <li>资料出处：fanqieApk 解包</li>
+        <li>仅代码建议 · 不跑设备</li>
+        <li>目标仓库：Vellum（Flutter）</li>
+      </ul>
+    </div>
+  </header>
+
+  <section class="brief">
+    <div class="rail">↓</div>
+    <div class="body-col three-points">
+      <div class="point">
+        <h3>背景 = 语义槽位 + 自定义图/色</h3>
+        <p>番茄没有 day/night 资源限定符切换，而是 5 套语义色槽位由代码驱动；自定义背景走独立的图/纯色配置，分 <code>dark / light / standard</code> 三档底色类型来决定正文墨色。</p>
+      </div>
+      <div class="point">
+        <h3>护眼是覆盖层，不是换背景</h3>
+        <p><code>is_eye_protect_open</code> 控制一层 alpha <strong>0.15</strong> 的半透明色层叠在正文之上；亮度则是窗口级 <code>screenBrightness</code>，不动用户系统设置。两者与背景互相独立。</p>
+      </div>
+      <div class="point">
+        <h3>朗读 = 句级断句 + 双击触发</h3>
+        <p>听书模式下双击取点击处句子触发 TTS，双击窗口 <strong>200ms</strong>（单击动作延迟到窗口结束）；句界由 native 分词器 <code>libtokenizer.so</code> 承担。Vellum 可用 Dart 句界正则 + 现有 TTS 服务复刻这套机制。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Part A: 背景设置 ================= -->
+  <section class="chapter" id="background">
+    <div class="rail">01</div>
+    <div class="body-col">
+      <h2>阅读页背景设置（本地自定义）</h2>
+
+      <h3>1.1 番茄实测事实</h3>
+      <table class="evidence">
+        <thead>
+          <tr><th>项</th><th>番茄做法</th><th>解包证据</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>预设背景</td>
+            <td>
+              5 套语义色槽位（代码驱动，非资源限定符）：
+              <div class="swatches">
+                <span class="sw" style="--c:#D7D7DB"><i></i>白 #D7D7DB</span>
+                <span class="sw" style="--c:#F7E4CF"><i></i>米黄 #F7E4CF</span>
+                <span class="sw" style="--c:#C9DECB"><i></i>护眼绿 #C9DECB</span>
+                <span class="sw" style="--c:#C2DEF0"><i></i>护眼蓝 #C2DEF0</span>
+                <span class="sw" style="--c:#262626"><i></i>夜 #262626</span>
+              </div>
+            </td>
+            <td>逆向报告 §6.1 · <code>res/values/colors.xml</code><br><code>zs5/w0.getBackgroundColor()</code></td>
+          </tr>
+          <tr>
+            <td>自定义背景</td>
+            <td>图 / 纯色都走独立配置：<code>rw4/p.getBackground()</code> → <code>sl5.v.h.b(ctx, config)</code>；UI 为 <code>PreviewCustomBackgroundView</code> / <code>BackgroundViewHolder</code>（先预览后应用）</td>
+            <td>逆向报告 §594</td>
+          </tr>
+          <tr>
+            <td>底色类型</td>
+            <td><code>ReaderBgColorType{ dark, light, standard }</code> —— 决定正文墨色与控件反色，而不是写死某背景</td>
+            <td>逆向报告 §594</td>
+          </tr>
+          <tr>
+            <td>护眼</td>
+            <td>覆盖层 <code>getEyeProtectedView()</code>，特定色 + <strong>alpha 0.15</strong>，开关 <code>is_eye_protect_open</code>；<strong>不改背景色</strong>，正文渲染零影响</td>
+            <td>逆向报告 §592 / §570</td>
+          </tr>
+          <tr>
+            <td>亮度</td>
+            <td>窗口级 <code>screenBrightness</code>，可读回系统值（跟随系统 = 不写）</td>
+            <td>逆向报告 §569</td>
+          </tr>
+          <tr>
+            <td>周边语义</td>
+            <td>夜间正文 <code>#B7B7B7 / #8C8C8C</code>，次要文字 <code>#66000000</code>，分割线 <code>#14000000</code>；品牌橙 <code>#FFFA6725</code> 与阅读底色解耦</td>
+            <td>阅读页UI复现规格_番茄.md §5</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>1.2 交互与机制建议</h3>
+      <ol class="advice">
+        <li><strong>三段式设置行</strong>（对齐番茄文案反推的功能清单）：预设色点一排 + 「自定义（纯色 / 相册图）」+ 亮度滑条 + 护眼开关。自定义背景支持「先预览后应用」，照搬 <code>PreviewCustomBackgroundView</code> 的心智。</li>
+        <li><strong>底色三槽位而不是自动猜色</strong>：自定义图/色由用户选 <code>亮 / 暗 / 中性</code> 一档（默认按图片平均亮度给推荐），正文墨色、页脚胶囊、顶栏按钮一律按槽位取色 —— 这正是 <code>ReaderBgColorType</code> 的作用。</li>
+        <li><strong>护眼、亮度、背景互相独立</strong>：护眼永远是叠加层（0.15），亮度走窗口属性，背景只管纸。三者可任意组合，互不覆盖。</li>
+        <li><strong>本地自定义 = 本地文件</strong>：图片经 <code>file_picker</code>（Vellum 已有依赖）复制进应用私有目录 <code>backgrounds/</code>，引用文件名而非绝对路径；纳入「存储管理」的占用统计与清理。纯色自定义用 hex 输入 + 小色板即可，不必引入取色器依赖。</li>
+        <li><strong>按书覆盖</strong>（番茄「本书单独设置」的等价物）：全局默认 + 可选的本书覆盖，存进现有 <code>ReadingState</code> 旁的独立字段。</li>
+      </ol>
+
+      <h3>1.3 代码建议</h3>
+
+      <div class="code-card">
+        <p class="code-title">① 数据模型与存储 —— <code>lib/services/reader_background.dart</code></p>
+<pre><code>/// 背景来源：预设 / 纯色 / 本地图片。tone 直接对应番茄的
+/// ReaderBgColorType{light, dark, standard}，只决定正文墨色，不决定背景。
+enum BackgroundKind { preset, color, image }
+enum BackgroundTone { light, dark, standard }
+
+class ReaderBackground {
+  const ReaderBackground({
+    this.kind = BackgroundKind.preset,
+    this.presetId = 'sepia',      // white|sepia|mint|blue|charcoal|night
+    this.colorValue,              // kind == color 时生效
+    this.imageFileName,           // kind == image 时生效（backgrounds/ 下的文件名）
+    this.tone = BackgroundTone.light,
+    this.brightness = -1,         // -1 跟随系统；0.05–1 为窗口级覆盖
+    this.eyeCare = false,         // 对应 is_eye_protect_open
+  });
+
+  factory ReaderBackground.fromJson(Map&lt;String, dynamic&gt; json) =&gt; …;   // 缺字段给默认值，旧文件可读
+  Map&lt;String, dynamic&gt; toJson() =&gt; …;
+}
+
+/// 全局默认；本书覆盖写进 ReadingState（复用现有 vellum_reader_prefs.json /
+/// vellum_reading_state.json 的存取模式，新文件 vellum_backgrounds.json）。
+class ReaderBackgroundStore {
+  Future&lt;ReaderBackground&gt; load({String? bookId});
+  Future&lt;void&gt; save(ReaderBackground value, {String? bookId});
+  Future&lt;File&gt; importImage(Uint8List bytes, String name); // → backgrounds/&lt;name&gt;
+}</code></pre>
+      </div>
+
+      <div class="code-card">
+        <p class="code-title">② 背景渲染器 —— 背景 / 护眼 / 亮度三层，互不干扰</p>
+<pre><code>Widget buildReadingSurface({
+  required ReaderBackground background,
+  required Widget child,
+}) {
+  final paper = switch (background.kind) {
+    BackgroundKind.preset  =&gt; VellumTheme.readerPaper(background.presetId),
+    BackgroundKind.color   =&gt; Color(background.colorValue ?? 0xfff7e4cf),
+    BackgroundKind.image   =&gt; null, // 交给 DecorationImage
+  };
+  return Stack(fit: StackFit.expand, children: [
+    DecoratedBox(
+      decoration: BoxDecoration(
+        color: paper,
+        image: background.kind == BackgroundKind.image
+            ? DecorationImage(
+                image: FileImage(File(background.imagePath!)),
+                fit: BoxFit.cover,
+                // 大图降采样，避免解码整图（与 cacheWidth 同思路）
+              )
+            : null,
+      ),
+      child: child,
+    ),
+    if (background.eyeCare)
+      // 番茄 getEyeProtectedView：覆盖层 alpha 0.15，不改背景
+      const IgnorePointer(child: ColoredBox(color: Color(0x26d9a441))),
+  ]);
+}
+
+/// 墨色只看 tone 槽位 —— 等价番茄 ReaderBgColorType 的用法
+Color inkFor(BackgroundTone tone) =&gt; switch (tone) {
+  BackgroundTone.light    =&gt; const Color(0xff000000),
+  BackgroundTone.dark     =&gt; const Color(0xffb7b7b7), // 夜间正文
+  BackgroundTone.standard =&gt; const Color(0xff8c8c8c), // 次一级对比
+};</code></pre>
+      </div>
+
+      <div class="code-card">
+        <p class="code-title">③ 亮度 —— 复用现有 <code>vellum/device</code> 通道（已实现 setScreenBrightness）</p>
+<pre><code>// reader_page 已有：_platform.setBrightness(value)  // -1 跟随系统
+// 建议：把 ReaderBackground.brightness 并进现有 ReaderPreferences.brightness
+// 的存取，避免两套亮度来源；护眼布尔则并进 eyeCare 档位（0/0.10/0.15/0.20）。</code></pre>
+      </div>
+
+      <h3>1.4 演示：背景工作室（本地自定义，不上传）</h3>
+      <p class="note">下图为机制演示：预设色 / 自定义色 / 本地图片、亮度、护眼三者正交叠加；正文墨色随 <code>tone</code> 槽位切换。图片仅在本机内存中读取，不发出任何请求。</p>
+
+      <div class="studio">
+        <div class="phone" id="bg-phone">
+          <div class="phone-screen" id="bg-screen">
+            <div class="phone-ink" id="bg-ink">
+              <p class="demo-title">第一章 起风</p>
+              <p>他把窗推开一条缝，雨声立刻挤进来。桌上摊着那本没读完的书，纸页边缘被潮气浸得发软。远处的灯一盏盏亮起来，像有人在夜色里慢慢点名。</p>
+              <p>「今天就到这里吧。」他说。可手指还停在段落中间，像是怕一松手，故事就会自己跑掉。</p>
+            </div>
+            <div class="phone-sheet">
+              <div class="sheet-row">
+                <span class="row-label">背景</span>
+                <div class="dots" id="preset-dots">
+                  <button class="dot" data-preset="white"    style="--c:#D7D7DB" title="白"></button>
+                  <button class="dot" data-preset="sepia"    style="--c:#F7E4CF" title="米黄"></button>
+                  <button class="dot" data-preset="mint"     style="--c:#C9DECB" title="护眼绿"></button>
+                  <button class="dot" data-preset="blue"     style="--c:#C2DEF0" title="护眼蓝"></button>
+                  <button class="dot" data-preset="charcoal" style="--c:#1A1A1A" title="炭"></button>
+                  <button class="dot" data-preset="night"    style="--c:#262626" title="夜"></button>
+                </div>
+              </div>
+              <div class="sheet-row">
+                <span class="row-label">自定义</span>
+                <label class="chip-btn">
+                  <input type="color" id="custom-color" value="#f7e4cf"> 纯色
+                </label>
+                <label class="chip-btn">
+                  <input type="file" id="custom-image" accept="image/*"> 本地图片
+                </label>
+                <select id="tone-select" class="chip-btn">
+                  <option value="light">墨色·亮底</option>
+                  <option value="dark">墨色·暗底</option>
+                  <option value="standard">墨色·中性</option>
+                </select>
+              </div>
+              <div class="sheet-row">
+                <span class="row-label">亮度</span>
+                <input type="range" id="brightness" min="20" max="100" value="100">
+              </div>
+              <div class="sheet-row">
+                <span class="row-label">护眼</span>
+                <label class="switch"><input type="checkbox" id="eyecare"><i></i>覆盖层 0.15</label>
+              </div>
+            </div>
+            <div class="dimmer" id="bg-dimmer"></div>
+            <div class="eyecare-layer" id="bg-eyecare"></div>
+          </div>
+        </div>
+        <div class="studio-log">
+          <p class="row-label">当前配置</p>
+          <pre id="bg-state">kind: preset
+presetId: sepia
+tone: light
+brightness: -1 (跟随系统)
+eyeCare: false</pre>
+          <p class="note">与建议中的 <code>ReaderBackground.toJson()</code> 同构；切到图片/纯色时 kind 随之变化。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= Part B: 朗读 ================= -->
+  <section class="chapter" id="tts">
+    <div class="rail">02</div>
+    <div class="body-col">
+      <h2>朗读 UI 与机制 · 可借鉴之处</h2>
+
+      <h3>2.1 番茄实测事实</h3>
+      <table class="evidence">
+        <thead>
+          <tr><th>项</th><th>番茄做法</th><th>解包证据</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>双击听书</td>
+            <td>仅在听书模式启用；双击取<strong>点击处句子</strong>触发 TTS 朗读；单击动作延迟到双击窗口结束，双击命中则取消单击</td>
+            <td>逆向报告 §544 · 手势 <code>zw4/n.java</code></td>
+          </tr>
+          <tr>
+            <td>双击窗口</td>
+            <td><code>key_audio_reader_double_click_interval_time</code> 默认 <strong>200ms</strong>（Debug 可调）</td>
+            <td>逆向报告 §582 · <code>DebugManager</code></td>
+          </tr>
+          <tr>
+            <td>句界断句</td>
+            <td>native 分词器 <code>libtokenizer.so</code> + 词典（Java 层未见直接调用，逆向结论：<strong>推测服务于 TTS 断句与断行</strong>）</td>
+            <td>逆向报告 §458 · 差距对照 §868</td>
+          </tr>
+          <tr>
+            <td>字幕字号</td>
+            <td>听书页有独立字幕字号：<code>PlayerFontSizeManager</code> / <code>SubtitleFontSizeData</code>；精简阅读器 <code>key_simple_reader_font_size</code> 默认 <strong>17sp</strong></td>
+            <td>报告 §103 · <code>…/audio/impl/ui/page/fontsize/**</code></td>
+          </tr>
+          <tr>
+            <td>TTS 开关</td>
+            <td>配置键 <code>key_is_tts</code>（按书记忆是否进入听书）</td>
+            <td>逆向报告 §760</td>
+          </tr>
+          <tr>
+            <td>输入矩阵</td>
+            <td>音量键翻页<strong>节流 300ms</strong>；双击仅听书模式占用（避免与翻页单击冲突）</td>
+            <td><code>reader/utils/e2.java</code> · 差距对照 §715</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2.2 可借鉴清单（按收益排序）</h3>
+      <ol class="advice">
+        <li><strong>句级断句 + 句级高亮</strong>：Vellum 的 <code>tts_text.dart</code> 已有按句切分；补一个「点击处句子提取」，朗读时把当前句作为 <code>ReaderParagraph(highlights: [当前句])</code> 传入 —— 高亮渲染器已经存在，零新增渲染代码。</li>
+        <li><strong>双击听书手势</strong>：在 <code>reader_gestures.dart</code> 引入 200ms 双击窗口；单击（翻页 / 呼出菜单）延迟到窗口结束再分派，双击命中则朗读该句。这是番茄手感的关键，也是最容易做错的一处。</li>
+        <li><strong>字幕行</strong>：朗读条上方加一行当前句字幕（等价番茄 17sp 字幕字号），大字号模式下尤其有用；复用 <code>TtsBar</code> 的胶囊容器即可。</li>
+        <li><strong>句粒度队列</strong>：把现有 <code>SpeakableSegment</code>（段粒度）细化到句粒度（<code>paragraphIndex + sentenceIndex</code> 进缓存 key），预取下一句；长段合成时延从秒级降到句级。</li>
+        <li><strong>按书记忆</strong>：<code>key_is_tts</code> 的等价物 —— 记住每本书是否在听书、听到哪句，重开书给「继续听」。</li>
+        <li><strong>输入矩阵补齐</strong>：听书中音量键 = 上一句/下一句（复用 <code>reader_platform</code> 的 <code>volumeKey</code> 回调），沿用 300ms 节流。</li>
+      </ol>
+
+      <h3>2.3 代码建议</h3>
+
+      <div class="code-card">
+        <p class="code-title">① 点击处句子提取 —— <code>tts_text.dart</code> 增补</p>
+<pre><code>/// 给定段落文本与点击的字符偏移，返回该句的 [start, end) 区间。
+/// 句界正则即番茄 libtokenizer.so 的 Dart 近似：中英句末标点 + 收尾引号。
+({int start, int end})? sentenceAt(String text, int offset) {
+  if (text.isEmpty) return null;
+  final o = offset.clamp(0, text.length - 1);
+  const end = r'[。！？!?…；;][”’"\')\]]?';
+  final ends = RegExp(end).allMatches(text).toList();
+  int start = 0, stop = text.length;
+  for (final m in ends) {
+    if (m.end &lt;= o) start = m.end;
+    if (m.end &gt; o) { stop = m.end; break; }
+  }
+  while (start &lt; text.length &amp;&amp; text[start] == ' ') start++;
+  return stop &gt; start ? (start: start, end: stop) : null;
+}
+
+/// 朗读高亮：句文本即 highlights 条目，渲染器零改动
+ReaderParagraph(
+  paragraph: raw,
+  highlights: [spokenSentence],
+  …
+);</code></pre>
+      </div>
+
+      <div class="code-card">
+        <p class="code-title">② 双击窗口分派 —— <code>reader_gestures.dart</code> 补丁思路</p>
+<pre><code>// resolvePointerUp 的改动方向（保持现有三分区翻页不动）：
+// 1) 首次单击不立即执行，挂 200ms Timer（番茄 key_audio_reader_double_click_interval_time）
+// 2) 窗口内第二次点击且落点相近（&lt; 24px）→ 取消 Timer，执行 doubleTap
+//    （听书模式：sentenceAt(段落, 点中偏移) → TtsClient 句级合成 → 播放 + 高亮）
+// 3) Timer 到期才执行原单击动作（翻页 / 呼出菜单）
+// 4) 仅听书模式占用双击；普通阅读保持现有即时单击手感（番茄同此）
+// 注意仲裁：SelectionArea 长按选词、下拉书签阈移的计时器与双击窗口并存，
+// 选词手势（_pointerLooksLikeSelection）必须优先于双击。</code></pre>
+      </div>
+
+      <div class="code-card">
+        <p class="code-title">③ 字幕行 + 朗读条 —— <code>reader/tts_bar.dart</code> 扩展</p>
+<pre><code>class TtsBar extends StatelessWidget {
+  // 现有：playing / positionLabel / speed / onPlayPause / onPrevious / onNext …
+  final String subtitle;   // 新增：当前句字幕（番茄 17sp 等效）
+  …
+  // 结构：胶囊容器内，上行字幕（13–14px，居中，单行省略），
+  // 下行沿用现有控制行（上一句 · 播放/暂停 · 下一句 · 语速 · 关闭）。</code></pre>
+      </div>
+
+      <div class="code-card">
+        <p class="code-title">④ 句粒度队列 —— <code>tts_text.dart</code> / <code>tts_cache.dart</code></p>
+<pre><code>class SpeakableSegment {
+  final int paragraphIndex;
+  final int sentenceIndex;   // 新增
+  final int partIndex;
+  final String text;         // 一句，而不是一段
+}
+
+// 缓存 key 追加 sentenceIndex；预取「下一句」而不是「下一段」。
+// 句级合成体积小（几十 KB），预取命中后换句几乎零延迟。</code></pre>
+      </div>
+
+      <h3>2.4 演示：双击听书（浏览器本地朗读）</h3>
+      <p class="note">双击任意一句即可朗读并高亮（浏览器 <code>speechSynthesis</code>，完全本地；不支持时自动降级为定时模拟）。下方控制条 = 建议中的 <code>TtsBar</code> + 字幕行。</p>
+
+      <div class="studio">
+        <div class="phone" id="tts-phone">
+          <div class="phone-screen tts-screen">
+            <div class="phone-ink tts-ink">
+              <p class="demo-title">第二章 灯下</p>
+              <p id="tts-source">他把书翻到夹着车票的那一页。票面已经褪色，只剩日期还看得清。那是很多年前的一个下午，雨也是这样下着。他忽然明白，所谓读完一本书，其实是让书把自己也读了一遍。</p>
+              <p class="hint">双击句子开始听书</p>
+            </div>
+            <div class="phone-sheet tts-sheet">
+              <div class="subtitle" id="tts-subtitle">字幕行 · 当前句显示在这里</div>
+              <div class="tts-row">
+                <button class="tts-btn" id="tts-prev" title="上一句">⏮</button>
+                <button class="tts-btn tts-play" id="tts-play" title="播放/暂停">▶</button>
+                <button class="tts-btn" id="tts-next" title="下一句">⏭</button>
+                <span class="tts-pos" id="tts-pos">— / —</span>
+                <button class="tts-btn tts-speed" id="tts-speed">×1.00</button>
+                <button class="tts-btn" id="tts-close" title="关闭">✕</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="studio-log">
+          <p class="row-label">机制对照</p>
+          <ul class="mini-list">
+            <li>双击窗口 <strong>200ms</strong> · 单击延迟分派</li>
+            <li>句界断句 ≈ <code>libtokenizer.so</code> 的 Dart 近似</li>
+            <li>当前句 = <code>highlights</code> 条目，复用现有渲染器</li>
+            <li>字幕行 ≈ 番茄 17sp 字幕字号</li>
+            <li>音量键上一句/下一句 · 节流 300ms（真机侧）</li>
+          </ul>
+          <p class="note">机制对应到 Vellum 现成模块：<code>tts_client.dart</code>（合成）、<code>tts_cache.dart</code>（缓存）、<code>tts_audio_handler.dart</code>（后台/通知栏）、<code>reader_platform.dart</code>（音量键回调）。</p>
+        </div>
+      </div>
+
+      <h3>2.5 不建议照抄</h3>
+      <ul class="advice flat">
+        <li><strong>native 分词器</strong>（<code>libtokenizer.so</code> + 词典）：为断句引入 so 与词典包不值当，Dart 句界正则已覆盖中英混排；只有做「按词断行排版」才需要分词。</li>
+        <li><strong>菜单 Dialog 挂 decor</strong>：番茄用它做触摸仲裁；Vellum 的 Stack overlay + 滑动关闭已可用，不必为此重构。</li>
+        <li><strong>Lynx 自定义标签 / 广告位 / 听书页内嵌商城</strong>：与本地离线阅读无关。</li>
+        <li><strong>番茄的橙色品牌体系</strong>：只取参数与机制，不取 <code>#FFFA6725</code> 品牌色；Vellum 保持朱砖 <code>#A33D2E</code>。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= Part C: 落地清单 ================= -->
+  <section class="chapter" id="plan">
+    <div class="rail">03</div>
+    <div class="body-col">
+      <h2>落地清单（按文件）</h2>
+      <table class="evidence">
+        <thead><tr><th>文件</th><th>改动</th><th>对应建议</th></tr></thead>
+        <tbody>
+          <tr><td><code>lib/services/reader_background.dart</code></td><td>新增：模型 + JSON 存取 + 图片导入（backgrounds/）</td><td>1.3 ①</td></tr>
+          <tr><td><code>lib/services/book_library.dart</code></td><td><code>storageUsage()</code> 纳入 backgrounds/ 与 tts_audio/ 两个目录</td><td>1.2 / 存储管理</td></tr>
+          <tr><td><code>lib/theme/vellum_theme.dart</code></td><td>补 <code>readerPaper(id)</code>、<code>inkFor(tone)</code>；保留现有 6 预设常量</td><td>1.3 ②</td></tr>
+          <tr><td><code>lib/reader/reader_page.dart</code></td><td>背景三层渲染（背景 / 护眼 0.15 / 亮度）；背景设置行接入</td><td>1.3 ② / ④</td></tr>
+          <tr><td><code>lib/reader/reader_control_panels.dart</code></td><td>背景行扩为：预设点 + 自定义（纯色/图）+ tone 槽位 + 亮度 + 护眼</td><td>1.2</td></tr>
+          <tr><td><code>lib/reader/reader_gestures.dart</code></td><td>200ms 双击窗口；单击延迟分派；双击 → 句级听书</td><td>2.3 ②</td></tr>
+          <tr><td><code>lib/services/tts_text.dart</code></td><td><code>sentenceAt()</code> 句区间提取；Segment 增加 sentenceIndex</td><td>2.3 ① / ④</td></tr>
+          <tr><td><code>lib/reader/tts_bar.dart</code></td><td>字幕行（当前句）；句粒度位置标签</td><td>2.3 ③</td></tr>
+          <tr><td><code>lib/services/listening_library.dart</code></td><td>新增：按书记忆「是否听书 / 听到哪句」（≈ key_is_tts）</td><td>2.2 ⑤</td></tr>
+        </tbody>
+      </table>
+      <p class="note">朗读主链（合成客户端双实现 / 段级缓存 / audio_service 后台与通知栏 / 设置页）已在仓库内，本页建议是对其的增量：句粒度、双击手势、字幕行、按书记忆。</p>
+    </div>
+  </section>
+
+  <footer class="colophon">
+    <div class="rail">§</div>
+    <div class="body-col">
+      <h3>证据索引</h3>
+      <ul class="mini-list">
+        <li><code>fanqieApk\番茄小说本地书与阅读功能逆向分析报告.md</code> —— §569–594（亮度/护眼/自定义背景/主题槽位）、§806–827（5 套背景色与 colors.xml）、§856–908（设置面板规格与文案反推）、§458/544/582/760（听书双击、断句、TTS 键）</li>
+        <li><code>fanqieApk\阅读页UI复现规格_番茄.md</code> —— §5 主题色与护眼遮罩 alpha 0.15</li>
+        <li><code>fanqieApk\改进解析与差距对照.md</code> —— §5.3 行距与护眼、§715–868（输入矩阵 / 分词器 / 未做项）</li>
+        <li><code>fanqieApk\阅读页UI设计规格.md</code> —— §2.4 菜单规格、§4 参数对照</li>
+        <li>反编译源：<code>_work\src\classes15\sources\com\ttreader\tthtmlparser\TTEpubLayoutConfig.java</code>、<code>zs5\w0.java</code>、<code>zs5\resource\a.java</code>（正文 24dp / 边距 24·40·40 / 段距 10dp / 行高 1.4）</li>
+      </ul>
+      <p class="signoff">Vellum · 代码建议稿 · 数据只引用解包事实与本仓库现状，不涉及运行时验证。</p>
+    </div>
+  </footer>
+
+</div>
+<script src="app.js"></script>
+</body>
+</html>

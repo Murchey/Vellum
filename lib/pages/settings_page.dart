@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -17,6 +17,7 @@ import 'font_manager_sheet.dart';
 
 import 'ebook_to_txt_page.dart';
 import 'reading_stats_page.dart';
+import 'tts_settings_page.dart';
 import 'update_sheet.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -434,6 +435,23 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                   ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+
+                    backgroundColorActivated: pressedBackground,
+
+                    leading: const Icon(CupertinoIcons.speaker_1),
+
+                    title: const Text('朗读服务（听书）'),
+
+                    additionalInfo: const Text('TTS 接口'),
+
+                    onTap: () => Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const TtsSettingsPage(),
+                      ),
+                    ),
+                  ),
                 ],
               ),
 
@@ -602,3 +620,4 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
+

@@ -27,9 +27,10 @@ class PageLayoutConfig {
   final double screenHeight;
   final String title;
 
-  /// SelectableText/strut can be a few pixels taller than TextPainter.
-  /// Reserve slack so the last line is never clipped at the page bottom.
-  static const double measurementSlack = 12;
+  /// SelectableText/rasterized glyphs can extend beyond TextPainter's reported
+  /// line box. Reserve half a rendered line (and never less than 12dp) so the
+  /// final line is moved whole to the next page instead of being hard-clipped.
+  double get measurementSlack => (lineHeight / 2).clamp(12.0, lineHeight);
 
   double get usableHeight =>
       (availableHeight - measurementSlack).clamp(80.0, availableHeight);

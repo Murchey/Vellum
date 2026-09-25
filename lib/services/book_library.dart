@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'book_importer.dart';
 import 'font_storage.dart';
+import 'reader_background.dart';
+import 'tts_cache.dart';
 import 'library_models.dart';
 import 'txt_catalog.dart';
 import 'txt_seek_source.dart';
@@ -545,6 +547,7 @@ class BookLibrary {
         page: saved.page,
         paragraphIndex: saved.paragraphIndex,
         bookmarks: saved.bookmarks,
+        chapterPositions: saved.chapterPositions,
         bookId: display.bookId,
       );
 
@@ -596,6 +599,10 @@ class BookLibrary {
       'paragraphIndex': state.paragraphIndex,
       'bookmarks': state.bookmarks,
       'bookId': book.storageId,
+      'chapterPositions': {
+        for (final entry in state.chapterPositions.entries)
+          entry.key.toString(): entry.value.toJson(),
+      },
     };
     await file.writeAsString(jsonEncode(states));
   }
@@ -654,6 +661,8 @@ class BookLibrary {
           ? await stateFile.length()
           : 0,
       fontBytes: await fontFile.exists() ? await fontFile.length() : 0,
+      backgroundBytes: await const ReaderBackgroundStore().sizeInBytes(),
+      ttsBytes: await const TtsCache().sizeInBytes(),
     );
   }
 

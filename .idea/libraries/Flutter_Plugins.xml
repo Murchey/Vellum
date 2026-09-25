@@ -17,6 +17,14 @@
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/url_launcher-6.3.2" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/path_provider_android-2.3.1" />
       <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/package_info_plus-9.0.1" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/sqflite_android-2.4.4" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/sqflite_darwin-2.4.4" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/just_audio-0.10.6" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/audio_service_web-0.1.4" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/audio_session-0.2.4" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/audio_service-0.18.19" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/sqflite-2.4.4" />
+      <root url="file://$PROJECT_DIR$/../../../pub_cache/hosted/pub.flutter-io.cn/just_audio_web-0.4.16" />
     </CLASSES>
     <JAVADOC />
     <SOURCES />

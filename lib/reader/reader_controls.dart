@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import '../services/notes_library.dart';
 import '../theme/vellum_theme.dart';
 import 'reader_chrome.dart';
+import '../services/reader_background.dart';
 import 'reader_control_panels.dart';
 import 'reader_models.dart';
 
@@ -60,6 +61,8 @@ class ReaderMenu extends StatefulWidget {
     required this.onShowFonts,
     this.onDismiss,
     this.onToggleUiTheme,
+    this.onListen,
+    this.listening = false,
     super.key,
   });
 
@@ -68,6 +71,13 @@ class ReaderMenu extends StatefulWidget {
 
   /// Leave the reader (Navigator.pop). Top-bar back / system back.
   final VoidCallback onBack;
+
+  /// Start listening from the current page; null hides the action on
+  /// platforms without speech support.
+  final VoidCallback? onListen;
+
+  /// Whether speech is currently playing (toggles the action's state).
+  final bool listening;
 
   /// Collapse chrome only (tap-outside, toggle). Never exits.
   final VoidCallback? onDismiss;
@@ -84,7 +94,7 @@ class ReaderMenu extends StatefulWidget {
   final double fontSize;
   final ReaderFontWeight readerFontWeight;
   final ReaderLineSpacing lineSpacing;
-  final Color background;
+  final ReaderBackground background;
   final ReadingMode readingMode;
   final PageTurnStyle pageTurnStyle;
   final double brightness;
@@ -105,7 +115,7 @@ class ReaderMenu extends StatefulWidget {
   final ValueChanged<double> onFontSize;
   final ValueChanged<ReaderFontWeight> onReaderFontWeight;
   final ValueChanged<ReaderLineSpacing> onLineSpacing;
-  final ValueChanged<Color> onBackground;
+  final ValueChanged<ReaderBackground> onBackground;
   final ValueChanged<ReadingMode> onReadingMode;
   final ValueChanged<PageTurnStyle> onPageTurnStyle;
   final ValueChanged<double> onBrightness;
@@ -217,7 +227,7 @@ class _ReaderMenuState extends State<ReaderMenu>
       return const SizedBox.shrink();
     }
     // Chrome sits on the reading paper so menu and page feel like one surface.
-    final themeBg = widget.background;
+    final themeBg = Color(widget.background.chromeColorValue);
     final chromeInk = VellumTheme.readerChromeInk(themeBg);
     final media = MediaQuery.of(context);
     final topSafe = media.padding.top;
@@ -494,6 +504,17 @@ class _ReaderMenuState extends State<ReaderMenu>
                 widget.onToggleUiTheme?.call();
               },
             ),
+            if (widget.onListen != null)
+              _actionItem(
+                context,
+                themeBg,
+                icon: widget.listening
+                    ? CupertinoIcons.speaker_2
+                    : CupertinoIcons.speaker_1,
+                label: widget.listening ? '听书中' : '听书',
+                selected: widget.listening,
+                onTap: widget.onListen!,
+              ),
             _actionItem(
               context,
               themeBg,

@@ -19,6 +19,15 @@ import 'reader_pagination.dart';
 import 'reader_paragraph.dart';
 import 'reader_platform.dart';
 import 'reader_selection.dart';
+import '../pages/tts_settings_page.dart';
+import '../services/tts_client.dart' show TtsException;
+import '../services/tts_preferences.dart';
+import 'tts_audio_handler.dart';
+import 'tts_bar.dart';
+import 'package:flutter/rendering.dart';
+import '../services/listening_library.dart';
+import '../services/reader_background.dart';
+import '../services/tts_text.dart' show sentenceAt;
 import 'reader_toc.dart';
 
 class ReaderPage extends StatefulWidget {
@@ -62,11 +71,29 @@ class _ReaderPageState extends State<ReaderPage>
   final _notesLibrary = const NotesLibrary();
   String _lastSelectedText = '';
   bool _showControls = false;
+  // Listening (听书): playback lives in the app-wide handler; the page
+  // only mirrors its state.
+  bool _listening = false;
+  double _ttsSpeed = 1.0;
+  String _ttsLabel = '';
+  String _spokenSentence = '';
+  String? _paperImage;
+  String? _paperImagePath;
+  double _paperImageOpacity = 1.0;
+  BackgroundTone _paperTone = BackgroundTone.light;
+  Color? _paperInk;
+  ImageProvider? _paperImageProvider;
+  Timer? _tapTimer;
+  Offset? _pendingTapPos;
+  ReaderTapAction? _pendingTapAction;
+  StreamSubscription? _ttsStateSub;
+
   late final ScrollController _scrollController;
   late final PageController _pageController;
   int _currentPage = 0;
   int _requestedPage = 0;
   int _currentParagraph = 0;
+  late Map<int, ChapterReadingPosition> _chapterPositions;
   late List<int> _bookmarks;
   bool _bookmarkPullArmed = false;
   double _pullDownDistance = 0;
@@ -125,9 +152,12 @@ class _ReaderPageState extends State<ReaderPage>
       widget.initialState.lineSpacing,
     );
     _bookmarks = widget.initialState.bookmarks.toSet().toList()..sort();
-    _background = widget.initialState.backgroundValue == null
-        ? null
-        : Color(widget.initialState.backgroundValue!);
+    _chapterPositions = {...widget.initialState.chapterPositions};
+    _background = VellumTheme.normalizeReaderBackground(
+      widget.initialState.backgroundValue == null
+          ? null
+          : Color(widget.initialState.backgroundValue!),
+    );
     _readingMode = widget.initialState.mode == 'page'
         ? ReadingMode.page
         : ReadingMode.scroll;
@@ -178,6 +208,7 @@ class _ReaderPageState extends State<ReaderPage>
     _startReadingTimer();
     _loadTodayReading();
     _loadNotes();
+    _loadPaper();
     _syncPlatformSettings();
   }
 
@@ -207,6 +238,16 @@ class _ReaderPageState extends State<ReaderPage>
       return;
     }
     _lastVolumeTurn = now;
+    // Listening: volume keys step sentences (reference input matrix).
+    final handler = ttsHandler;
+    if (handler != null && handler.hasBook) {
+      if (direction > 0) {
+        handler.skipToNext();
+      } else {
+        handler.skipToPrevious();
+      }
+      return;
+    }
     if (_readingMode == ReadingMode.page) {
       _changePage(context, direction);
       return;
@@ -396,6 +437,9 @@ class _ReaderPageState extends State<ReaderPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _tapTimer?.cancel();
+    _ttsStateSub?.cancel();
+    _detachTtsCallbacks();
     _selectionHoldTimer?.cancel();
     _readTimer?.cancel();
     _readStopwatch?.stop();
@@ -464,6 +508,291 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
+  /// Reading paper: presets keep their theme-tuned look; custom colours and
+  /// local images switch body ink by the three-tone slot (reference
+  /// ReaderBgColorType). Paper / eye-care / brightness stay orthogonal.
+  ReaderBackground get _paper => ReaderBackground(
+    kind: _paperImage == null ? BackgroundKind.solid : BackgroundKind.image,
+    colorValue: _background?.toARGB32(),
+    imageFileName: _paperImage,
+    imageOpacity: _paperImageOpacity,
+    tone: _paperTone,
+    inkColorValue: _paperInk?.toARGB32(),
+  );
+
+  Color get _readerInk => Color(_paper.inkValue);
+
+  /// Paper stack: underlay colour + optional image at [imageOpacity].
+  /// The [ImageProvider] is cached so page-turn rebuilds never re-decode
+  /// (that was the background flash). Used by the live page and the cover
+  /// turn overlay so both paint the same surface.
+  Widget _paperSurface(BuildContext context) {
+    final provider = _paperImageProvider;
+    final underlay = _backgroundFor(context);
+    if (provider == null) return ColoredBox(color: underlay);
+    final opacity = _paperImageOpacity.clamp(0.0, 1.0);
+    return ColoredBox(
+      color: underlay,
+      child: opacity <= 0
+          ? const SizedBox.expand()
+          : Opacity(
+              opacity: opacity,
+              child: Image(
+                image: provider,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (_, _, _) => const SizedBox.expand(),
+              ),
+            ),
+    );
+  }
+
+  Widget _paperLayer(BuildContext context) {
+    return Positioned.fill(
+      child: RepaintBoundary(child: _paperSurface(context)),
+    );
+  }
+
+  void _setPaperImageProvider(String? path) {
+    if (path == null) {
+      _paperImageProvider = null;
+      _paperImagePath = null;
+      return;
+    }
+    if (path == _paperImagePath && _paperImageProvider != null) return;
+    _paperImagePath = path;
+    _paperImageProvider = FileImage(File(path));
+  }
+
+  Future<void> _loadPaper() async {
+    final store = const ReaderBackgroundStore();
+    final stored = await store.load(bookId: _bookId);
+    if (!mounted) return;
+    if (stored != null) {
+      final path = stored.usesImage
+          ? await store.imagePathFor(stored.imageFileName!)
+          : null;
+      if (!mounted) return;
+      setState(() {
+        _background = stored.colorValue == null
+            ? null
+            : Color(stored.colorValue!);
+        _paperImage = stored.imageFileName;
+        _paperImageOpacity = stored.imageOpacity;
+        _paperTone = stored.tone;
+        _paperInk = stored.inkColorValue == null
+            ? null
+            : Color(stored.inkColorValue!);
+        _setPaperImageProvider(path);
+      });
+      return;
+    }
+    // Migrate the legacy solid-colour field once.
+    final color = _background;
+    if (color == null) return;
+    final argb = color.toARGB32();
+    final darkPreset =
+        argb == VellumTheme.readerNight.toARGB32() ||
+        argb == VellumTheme.readerCharcoal.toARGB32() ||
+        argb == VellumTheme.readerSoftBlack.toARGB32();
+    final tone = darkPreset
+        ? BackgroundTone.dark
+        : ReaderBackground.suggestTone(argb);
+    setState(() => _paperTone = tone);
+    await store.save(
+      ReaderBackground(kind: BackgroundKind.solid, colorValue: argb, tone: tone),
+      bookId: _bookId,
+    );
+  }
+
+  Future<void> _applyPaper(ReaderBackground value) async {
+    final store = const ReaderBackgroundStore();
+    final path = value.usesImage
+        ? await store.imagePathFor(value.imageFileName!)
+        : null;
+    if (!mounted) return;
+    setState(() {
+      _background = value.colorValue == null
+          ? null
+          : Color(value.colorValue!);
+      _paperImage = value.imageFileName;
+      _paperImageOpacity = value.imageOpacity;
+      _paperTone = value.tone;
+      _paperInk = value.inkColorValue == null
+          ? null
+          : Color(value.inkColorValue!);
+      _setPaperImageProvider(path);
+    });
+    await store.save(value, bookId: _bookId);
+    _scheduleSave();
+  }
+
+  /// Paragraph the listen feature should start from: the one in the middle
+  /// of the screen in scroll mode, the first one on the page in page mode.
+  int _listenStartParagraph() {
+    if (_readingMode == ReadingMode.page) return _firstParagraphOfCurrentPage();
+    if (!_scrollController.hasClients) return _currentParagraph;
+    final size = MediaQuery.sizeOf(context);
+    final centerY = size.height / 2;
+    var best = _currentParagraph;
+    var bestDistance = double.infinity;
+    for (final entry in _paragraphKeys.entries) {
+      final box = entry.value.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.attached) continue;
+      final topLeft = box.localToGlobal(Offset.zero);
+      final distance = (topLeft.dy + box.size.height / 2 - centerY).abs();
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = entry.key;
+      }
+    }
+    final max = widget.book.paragraphs.length - 1;
+    return best < 0 ? 0 : (best > max ? max : best);
+  }
+
+  Future<void> _startListening() async {
+    final handler = ttsHandler;
+    if (handler == null || widget.book.paragraphs.isEmpty) return;
+    final preferences = await const TtsPreferencesStore().load();
+    if (!mounted) return;
+    if (!preferences.isConfigured) {
+      final go = await showCupertinoDialog<bool>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: const Text('未配置朗读服务'),
+          content: const Text('先填写 TTS 接口地址和 API Key，之后就能从当前页开始听书。'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            CupertinoDialogAction(
+              isDefaultAction: true,
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('去设置'),
+            ),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+      await Navigator.of(context).push(
+        CupertinoPageRoute(builder: (_) => const TtsSettingsPage()),
+      );
+      return;
+    }
+
+    // Continue where the last session stopped (local key_is_tts memory).
+    final remembered = await const ListeningLibrary().load(_bookId);
+    if (!mounted) return;
+    var startParagraph = _listenStartParagraph();
+    var startSentence = 0;
+    if (remembered != null && remembered.paragraphIndex != startParagraph) {
+      final resume = await showCupertinoDialog<bool>(
+        context: context,
+        builder: (context) => CupertinoAlertDialog(
+          title: const Text('继续听书？'),
+          content: Text('上次听到第 ${remembered.paragraphIndex + 1} 段。'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('从本页开始'),
+            ),
+            CupertinoDialogAction(
+              isDefaultAction: true,
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('继续上次'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (resume == true) {
+        startParagraph = remembered.paragraphIndex;
+        startSentence = remembered.sentenceIndex;
+      }
+    }
+    handler.onSentenceChanged = (paragraphIndex, sentenceIndex, text) {
+      if (!mounted) return;
+      setState(() {
+        _currentParagraph = paragraphIndex;
+        _spokenSentence = text;
+      });
+      _jumpToParagraph(paragraphIndex);
+      const ListeningLibrary().save(
+        _bookId,
+        ListeningPosition(
+          paragraphIndex: paragraphIndex,
+          sentenceIndex: sentenceIndex,
+        ),
+      );
+    };
+    handler.onError = _onTtsError;
+    _ttsStateSub?.cancel();
+    _ttsStateSub = handler.playbackState.listen((state) {
+      if (!mounted) return;
+      setState(() {
+        _listening = state.playing || handler.hasBook;
+        _ttsLabel = handler.positionLabel;
+        _ttsSpeed = handler.preferences?.speed ?? _ttsSpeed;
+      });
+    });
+
+    await handler.startBook(
+      bookId: _bookId,
+      bookTitle: widget.book.title,
+      paragraphs: widget.book.paragraphs,
+      startParagraph: startParagraph,
+      startSentence: startSentence,
+    );
+    if (!mounted) return;
+    setState(() {
+      _listening = true;
+      _showControls = false;
+    });
+  }
+
+  void _onTtsError(TtsException error) {
+    if (!mounted) return;
+    _showBookmarkNotice(error.userMessage);
+    setState(() => _listening = false);
+  }
+
+  Future<void> _stopListening() async {
+    final handler = ttsHandler;
+    if (handler == null) return;
+    _ttsStateSub?.cancel();
+    _ttsStateSub = null;
+    _detachTtsCallbacks();
+    await handler.stop();
+    if (!mounted) return;
+    setState(() {
+      _listening = false;
+      _spokenSentence = '';
+    });
+  }
+
+  void _detachTtsCallbacks() {
+    final handler = ttsHandler;
+    if (handler == null) return;
+    if (handler.onSentenceChanged != null) handler.onSentenceChanged = null;
+    if (handler.onError != null) handler.onError = null;
+  }
+
+  static const _ttsSpeedSteps = [0.75, 1.0, 1.25, 1.5, 2.0];
+
+  Future<void> _cycleTtsSpeed() async {
+    final handler = ttsHandler;
+    if (handler == null) return;
+    final current = handler.preferences?.speed ?? 1.0;
+    final next = _ttsSpeedSteps.firstWhere(
+      (speed) => speed > current + 0.01,
+      orElse: () => _ttsSpeedSteps.first,
+    );
+    setState(() => _ttsSpeed = next);
+    await handler.setSpeed(next);
+  }
+
   Future<void> _removeBookmark(int paragraph) async {
     if (!_bookmarks.contains(paragraph)) return;
     setState(() => _bookmarks.remove(paragraph));
@@ -495,6 +824,7 @@ class _ReaderPageState extends State<ReaderPage>
   Future<void> _saveState() async {
     final callback = widget.onStateChanged;
     if (callback == null) return;
+    _rememberCurrentChapterPosition();
     final paragraphIndex = _readingMode == ReadingMode.page
         ? _firstParagraphOfCurrentPage()
         : _currentParagraph;
@@ -517,6 +847,7 @@ class _ReaderPageState extends State<ReaderPage>
       eyeCare: _eyeCare.name,
       keepScreenOn: _keepScreenOn,
       volumeKeys: _volumeKeys,
+      chapterPositions: Map.unmodifiable(_chapterPositions),
     );
     _saveQueue = _saveQueue.then((_) => callback(state));
     await _saveQueue;
@@ -758,6 +1089,28 @@ class _ReaderPageState extends State<ReaderPage>
     return found;
   }
 
+  int _chapterStartForParagraph(int paragraph) {
+    final index = _chapterIndexFor(paragraph);
+    return index < 0 ? 0 : _chapters[index].key;
+  }
+
+  void _rememberCurrentChapterPosition() {
+    final restored = _readingMode == ReadingMode.page
+        ? _pagePositionRestored
+        : _scrollPositionRestored;
+    if (!restored || _chapters.isEmpty) return;
+    final paragraph = _activeParagraph.clamp(
+      0,
+      widget.book.paragraphs.isEmpty ? 0 : widget.book.paragraphs.length - 1,
+    );
+    final start = _chapterStartForParagraph(paragraph);
+    _chapterPositions[start] = ChapterReadingPosition(
+      position: _scrollController.hasClients ? _scrollController.offset : 0,
+      page: _currentPage,
+      paragraphIndex: paragraph,
+    );
+  }
+
   /// Chapter title only — top-left / menu bar (Fanqie running head).
   String get _chapterLabel {
     if (_chapters.isEmpty) return '';
@@ -840,17 +1193,17 @@ class _ReaderPageState extends State<ReaderPage>
     final entries = _chapters;
     if (entries.isEmpty) return;
     final index = chapterIndex.clamp(0, entries.length - 1);
-    _jumpToParagraph(entries[index].key);
+    _jumpToParagraph(entries[index].key, restoreChapter: true);
   }
 
-  void _jumpToScrollParagraph(int target) {
+  void _jumpToScrollParagraph(int target, {double? preferredOffset}) {
     final count = widget.book.paragraphs.length;
     if (count == 0 || !_scrollController.hasClients) return;
     final index = target.clamp(0, count - 1);
     final fraction = count <= 1 ? 0.0 : index / (count - 1);
     final position = _scrollController.position;
     _scrollController.jumpTo(
-      (fraction * position.maxScrollExtent).clamp(
+      (preferredOffset ?? (fraction * position.maxScrollExtent)).clamp(
         0.0,
         position.maxScrollExtent,
       ),
@@ -911,11 +1264,19 @@ class _ReaderPageState extends State<ReaderPage>
     });
   }
 
-  void _jumpToParagraph(int paragraphIndex) {
+  void _jumpToParagraph(int paragraphIndex, {bool restoreChapter = false}) {
     final maxIndex = widget.book.paragraphs.isEmpty
         ? 0
         : widget.book.paragraphs.length - 1;
-    final target = paragraphIndex.clamp(0, maxIndex);
+    _rememberCurrentChapterPosition();
+    var target = paragraphIndex.clamp(0, maxIndex);
+    ChapterReadingPosition? checkpoint;
+    if (restoreChapter) {
+      checkpoint = _chapterPositions[paragraphIndex];
+      if (checkpoint != null) {
+        target = checkpoint.paragraphIndex.clamp(0, maxIndex);
+      }
+    }
     if (_readingMode == ReadingMode.page) {
       final page = _pageForParagraph(target).clamp(0, _pageCount - 1);
       if (_pageController.hasClients) {
@@ -931,7 +1292,7 @@ class _ReaderPageState extends State<ReaderPage>
       }
       return;
     }
-    _jumpToScrollParagraph(target);
+    _jumpToScrollParagraph(target, preferredOffset: checkpoint?.position);
   }
 
   Widget _bookmarkPullIndicator(BuildContext context) {
@@ -1042,6 +1403,43 @@ class _ReaderPageState extends State<ReaderPage>
       screenHeight: size.height,
       selectionGesture: selectionGesture,
     );
+    _dispatchTap(action, event.position);
+  }
+
+  /// While a listen session is armed, single taps wait out the double-tap
+  /// window (200 ms, the reference reader's
+  /// `key_audio_reader_double_click_interval_time`) so a second tap can speak
+  /// the tapped sentence; otherwise the action runs immediately.
+  void _dispatchTap(ReaderTapAction action, Offset upPosition) {
+    final listenArmed = ttsHandler?.hasBook ?? false;
+    if (!listenArmed || action == ReaderTapAction.none) {
+      _runTap(action);
+      return;
+    }
+    final pending = _pendingTapPos;
+    if (_tapTimer != null &&
+        pending != null &&
+        (upPosition - pending).distance < 24) {
+      _tapTimer!.cancel();
+      _tapTimer = null;
+      _pendingTapPos = null;
+      _pendingTapAction = null;
+      _speakSentenceAt(upPosition);
+      return;
+    }
+    _tapTimer?.cancel();
+    _pendingTapPos = upPosition;
+    _pendingTapAction = action;
+    _tapTimer = Timer(const Duration(milliseconds: 200), () {
+      _tapTimer = null;
+      final deferred = _pendingTapAction;
+      _pendingTapAction = null;
+      _pendingTapPos = null;
+      if (deferred != null) _runTap(deferred);
+    });
+  }
+
+  void _runTap(ReaderTapAction action) {
     switch (action) {
       case ReaderTapAction.none:
         break;
@@ -1054,6 +1452,50 @@ class _ReaderPageState extends State<ReaderPage>
         _changePage(context, -1);
       case ReaderTapAction.nextPage:
         _changePage(context, 1);
+    }
+  }
+
+  /// Double-tap listen: find the paragraph under the tap, ask its text layer
+  /// for the character offset, and speak the containing sentence.
+  void _speakSentenceAt(Offset global) {
+    final handler = ttsHandler;
+    if (handler == null || !handler.hasBook) return;
+    for (final key in _paragraphKeys.values) {
+      final paragraphContext = key.currentContext;
+      if (paragraphContext == null) continue;
+      final root = paragraphContext.findRenderObject();
+      if (root is! RenderBox || !root.attached) continue;
+      RenderBox? textBox;
+      void hunt(RenderObject node) {
+        if (textBox != null) return;
+        if (node is RenderBox &&
+            (node is RenderParagraph || node is RenderEditable)) {
+          textBox = node;
+          return;
+        }
+        node.visitChildren(hunt);
+      }
+
+      hunt(root);
+      final box = textBox;
+      if (box == null) continue;
+      final origin = box.localToGlobal(Offset.zero);
+      final local = global - origin;
+      if (local.dy < -4 || local.dy > box.size.height + 4) continue;
+      // SelectableText renders through RenderEditable (global hit test);
+      // plain Text.rich through RenderParagraph (local).
+      final position = box is RenderParagraph
+          ? box.getPositionForOffset(local)
+          : (box as RenderEditable).getPositionForPoint(global);
+      final plain = box is RenderParagraph
+          ? box.text.toPlainText()
+          : (box as RenderEditable).plainText;
+      final span = sentenceAt(plain, position.offset);
+      if (span == null) continue;
+      final sentence = plain.substring(span.start, span.end).trim();
+      if (sentence.isEmpty) continue;
+      handler.speakSentence(sentence);
+      return;
     }
   }
 
@@ -1082,7 +1524,8 @@ class _ReaderPageState extends State<ReaderPage>
         child: SafeArea(
           child: Stack(
             children: [
-              Localizations.override(
+              _paperLayer(context),
+            Localizations.override(
                 context: context,
                 delegates: const [DefaultMaterialLocalizations.delegate],
                 child: SelectionArea(
@@ -1207,9 +1650,7 @@ class _ReaderPageState extends State<ReaderPage>
                                       fontFamily: _readerFontFamily,
                                       lineSpacing: _lineSpacing,
                                       fontWeight: _readerFontWeight,
-                                      ink: VellumTheme.readerInkFor(
-                                        _backgroundFor(context),
-                                      ),
+                                      ink: _readerInk,
                                       contextMenuBuilder:
                                           createReaderSelectionToolbar(
                                             bookId: _bookId,
@@ -1219,9 +1660,11 @@ class _ReaderPageState extends State<ReaderPage>
                                             notesLibrary: _notesLibrary,
                                             onHighlight: _toggleHighlight,
                                           ),
-                                      highlights:
-                                          _highlights[paragraphIndex] ??
-                                          const [],
+                                      highlights: [
+                                      ...?_highlights[paragraphIndex],
+                                      if (_spokenSentence.isNotEmpty)
+                                        _spokenSentence,
+                                    ],
                                       isChapterHeading: _tocParagraphs.contains(
                                         paragraphIndex,
                                       ),
@@ -1294,6 +1737,22 @@ class _ReaderPageState extends State<ReaderPage>
                   chapterLabel: _chapterLabel,
                   surface: _backgroundFor(context),
                 ),
+              if (_listening && !_showControls)
+                TtsBar(
+                  playing: ttsHandler?.isPlaying ?? false,
+                  positionLabel: _ttsLabel,
+                  speed: _ttsSpeed,
+                  subtitle: _spokenSentence,
+                  onPlayPause: () {
+                    final handler = ttsHandler;
+                    if (handler == null) return;
+                    handler.isPlaying ? handler.pause() : handler.play();
+                  },
+                  onPrevious: () => ttsHandler?.skipToPrevious(),
+                  onNext: () => ttsHandler?.skipToNext(),
+                  onCycleSpeed: _cycleTtsSpeed,
+                  onClose: _stopListening,
+                ),
               if (_isCurrentViewBookmarked)
                 Semantics(
                   label: '当前阅读页面已添加书签',
@@ -1357,6 +1816,10 @@ class _ReaderPageState extends State<ReaderPage>
                 },
                 // Tap outside only collapses chrome — not an exit.
                 onDismiss: () => setState(() => _showControls = false),
+              // Listening runs through the app-wide handler; null on platforms
+              // without speech support hides the action.
+              onListen: ttsHandler == null ? null : _startListening,
+              listening: _listening,
                 onToggleBookmark: _toggleBookmarkAtCurrentPosition,
                 progress: _progress,
                 chapterCount: _chapters.length,
@@ -1370,7 +1833,7 @@ class _ReaderPageState extends State<ReaderPage>
                 fontSize: _fontSize,
                 readerFontWeight: _readerFontWeight,
                 lineSpacing: _lineSpacing,
-                background: _backgroundFor(context),
+                background: _paper,
                 readingMode: _readingMode,
                 pageTurnStyle: _pageTurnStyle,
                 brightness: _brightness,
@@ -1390,7 +1853,12 @@ class _ReaderPageState extends State<ReaderPage>
                 currentParagraph: _activeParagraph,
                 onJumpToParagraph: (paragraph) {
                   setState(() => _showControls = false);
-                  _jumpToParagraph(paragraph);
+                  _jumpToParagraph(
+                    paragraph,
+                    restoreChapter: _chapters.any(
+                      (entry) => entry.key == paragraph,
+                    ),
+                  );
                 },
                 onRemoveBookmark: _removeBookmark,
                 onRemoveNote: _removeNote,
@@ -1410,10 +1878,7 @@ class _ReaderPageState extends State<ReaderPage>
                   _saveTimer?.cancel();
                   _saveState();
                 },
-                onBackground: (value) {
-                  setState(() => _background = value);
-                  _scheduleSave();
-                },
+                onBackground: _applyPaper,
                 onReadingMode: (value) {
                   _setReadingMode(value);
                 },
@@ -1497,9 +1962,7 @@ class _ReaderPageState extends State<ReaderPage>
                           fontFamily: _readerFontFamily,
                           lineSpacing: _lineSpacing,
                           fontWeight: _readerFontWeight,
-                          ink: VellumTheme.readerInkFor(
-                            _backgroundFor(context),
-                          ),
+                          ink: _readerInk,
                           contextMenuBuilder: createReaderSelectionToolbar(
                             bookId: _bookId,
                             bookTitle: widget.book.title,
@@ -1508,9 +1971,11 @@ class _ReaderPageState extends State<ReaderPage>
                             notesLibrary: _notesLibrary,
                             onHighlight: _toggleHighlight,
                           ),
-                          highlights:
-                              _highlights[fragments[index].paragraphIndex] ??
-                              const [],
+                          highlights: [
+                                      ...?_highlights[fragments[index].paragraphIndex],
+                                      if (_spokenSentence.isNotEmpty)
+                                        _spokenSentence,
+                                    ],
                           isChapterHeading: _tocParagraphs.contains(
                             fragments[index].paragraphIndex,
                           ),
@@ -1539,7 +2004,7 @@ class _ReaderPageState extends State<ReaderPage>
       fontSize: _fontSize + 9,
       height: 1.3,
       fontWeight: FontWeight.w600,
-      color: VellumTheme.readerInkFor(_backgroundFor(context)),
+      color: _readerInk,
     ),
   );
   void _showFontPicker() {
@@ -1750,22 +2215,27 @@ class _ReaderPageState extends State<ReaderPage>
 
   Widget _coverPageSurface(BuildContext context, int page) {
     if (page < 0 || page >= _pageCount) return const SizedBox.expand();
-    return ColoredBox(
-      color: _backgroundFor(context),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          _readerSideInset,
-          _readerTopInset,
-          _readerSideInset,
-          _readerBottomInset,
+    // Same paper stack as the live page (underlay + image). Painting only a
+    // solid colour here made the background pop every cover-style turn.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        RepaintBoundary(child: _paperSurface(context)),
+        Padding(
+          padding: EdgeInsets.fromLTRB(
+            _readerSideInset,
+            _readerTopInset,
+            _readerSideInset,
+            _readerBottomInset,
+          ),
+          // selectable:true matches the PageView builder exactly. Rendering the
+          // overlay with selectable:false used SelectableText vs Text and let
+          // the two widgets lay out differently — the page visibly "settled"
+          // (paragraph spacing shifted) the moment the animation ended.
+          // The overlay is already wrapped in IgnorePointer.
+          child: _readingPage(context, page, selectable: true),
         ),
-        // selectable:true matches the PageView builder exactly. Rendering the
-        // overlay with selectable:false used SelectableText vs Text and let
-        // the two widgets lay out differently — the page visibly "settled"
-        // (paragraph spacing shifted) the moment the animation ended.
-        // The overlay is already wrapped in IgnorePointer.
-        child: _readingPage(context, page, selectable: true),
-      ),
+      ],
     );
   }
 }

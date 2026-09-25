@@ -1,0 +1,148 @@
+import 'package:flutter/cupertino.dart';
+
+import '../theme/vellum_theme.dart';
+
+/// Floating control bar while the listen (听书) feature is active.
+///
+/// Mirrors the notification controls: previous/play-pause/next sentence, the
+/// speed preset, and close. A one-line caption shows the sentence being spoken
+/// (the reference reader's listening subtitle).
+class TtsBar extends StatelessWidget {
+  const TtsBar({
+    required this.playing,
+    required this.positionLabel,
+    required this.speed,
+    required this.onPlayPause,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onCycleSpeed,
+    required this.onClose,
+    this.subtitle = '',
+    super.key,
+  });
+
+  final bool playing;
+  final String positionLabel;
+  final double speed;
+  final VoidCallback onPlayPause;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onCycleSpeed;
+  final VoidCallback onClose;
+
+  /// Current sentence, shown as a one-line caption.
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = VellumTheme.accentOf(context);
+    final ink = VellumTheme.inkOf(context);
+    final muted = VellumTheme.mutedOf(context);
+
+    return SafeArea(
+      top: false,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: VellumTheme.readerChromeOf(context).withValues(alpha: .97),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: VellumTheme.lineOf(context)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x22000000),
+                  blurRadius: 14,
+                  offset: Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (subtitle.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(10, 0, 10, 4),
+                    child: Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: ink, height: 1.3),
+                    ),
+                  ),
+                Row(
+                  children: [
+                    _icon(
+                      context,
+                      CupertinoIcons.backward_end,
+                      onPrevious,
+                      color: muted,
+                    ),
+                    _icon(
+                      context,
+                      playing ? CupertinoIcons.pause : CupertinoIcons.play,
+                      onPlayPause,
+                      color: playing ? accent : ink,
+                      size: 30,
+                    ),
+                    _icon(
+                      context,
+                      CupertinoIcons.forward_end,
+                      onNext,
+                      color: muted,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        positionLabel,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: muted),
+                      ),
+                    ),
+                    CupertinoButton(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      minimumSize: const Size(44, 36),
+                      onPressed: onCycleSpeed,
+                      child: Text(
+                        '×${speed.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: accent,
+                        ),
+                      ),
+                    ),
+                    _icon(
+                      context,
+                      CupertinoIcons.xmark,
+                      onClose,
+                      color: muted,
+                      size: 18,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _icon(
+    BuildContext context,
+    IconData icon,
+    VoidCallback onTap, {
+    required Color color,
+    double size = 24,
+  }) => CupertinoButton(
+    padding: EdgeInsets.zero,
+    minimumSize: const Size(44, 36),
+    onPressed: onTap,
+    child: Icon(icon, size: size, color: color),
+  );
+}

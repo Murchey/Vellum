@@ -79,4 +79,12 @@ void main() {
   test('ReaderMarkup still strips heading markers for measurement', () {
     expect(ReaderMarkup.readerText('[[vellum-heading:2]]标题'), '标题');
   });
+
+  test('pagination reserves at least half a rendered line at the bottom', () {
+    final layout = config();
+    expect(
+      layout.availableHeight - layout.usableHeight,
+      greaterThanOrEqualTo(layout.lineHeight / 2),
+    );
+  });
 }
