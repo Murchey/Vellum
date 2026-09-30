@@ -1,4 +1,6 @@
 import 'dart:convert';
+
+import 'package:flutter/painting.dart' show FontWeight;
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
@@ -16,6 +18,91 @@ enum WritingFormat {
         (format) => format.name == value,
         orElse: () => WritingFormat.md,
       );
+}
+
+/// Editor typography for the writing tab (shared across drafts).
+class WritingTypography {
+  const WritingTypography({
+    this.fontFamily,
+    this.fontSize = 16,
+    this.weightIndex = 1,
+  });
+
+  /// null = system default; otherwise a font-family alias.
+  final String? fontFamily;
+  final double fontSize;
+
+  /// 0 细 / 1 常规 / 2 中粗 / 3 粗
+  final int weightIndex;
+
+  static const weightLabels = ['细', '常规', '中粗', '粗'];
+  static const weightValues = [
+    FontWeight.w300,
+    FontWeight.w400,
+    FontWeight.w500,
+    FontWeight.w700,
+  ];
+
+  FontWeight get fontWeight =>
+      weightValues[weightIndex.clamp(0, weightValues.length - 1)];
+
+  static const minSize = 12.0;
+  static const maxSize = 28.0;
+
+  WritingTypography copyWith({
+    String? fontFamily,
+    bool clearFont = false,
+    double? fontSize,
+    int? weightIndex,
+  }) => WritingTypography(
+    fontFamily: clearFont ? null : (fontFamily ?? this.fontFamily),
+    fontSize: fontSize ?? this.fontSize,
+    weightIndex: weightIndex ?? this.weightIndex,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'fontFamily': fontFamily,
+    'fontSize': fontSize,
+    'weightIndex': weightIndex,
+  };
+
+  factory WritingTypography.fromJson(Map<String, dynamic> json) {
+    final size = (json['fontSize'] as num?)?.toDouble() ?? 16.0;
+    return WritingTypography(
+      fontFamily: json['fontFamily'] as String?,
+      fontSize: size.clamp(minSize, maxSize),
+      weightIndex: ((json['weightIndex'] as num?)?.toInt() ?? 1).clamp(0, 3),
+    );
+  }
+}
+
+/// Local persistence for writing-tab typography.
+class WritingTypographyStore {
+  const WritingTypographyStore();
+
+  Future<WritingTypography> load() async {
+    try {
+      final file = await _file();
+      if (!await file.exists()) return const WritingTypography();
+      final raw = jsonDecode(await file.readAsString());
+      if (raw is Map<String, dynamic>) {
+        return WritingTypography.fromJson(raw);
+      }
+    } catch (_) {}
+    return const WritingTypography();
+  }
+
+  Future<void> save(WritingTypography value) async {
+    final file = await _file();
+    await file.writeAsString(jsonEncode(value.toJson()), flush: true);
+  }
+
+  Future<File> _file() async {
+    final dir = await getApplicationDocumentsDirectory();
+    return File(
+      '${dir.path}${Platform.pathSeparator}vellum_writing_typo.json',
+    );
+  }
 }
 
 class WritingDocument {

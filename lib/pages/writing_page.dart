@@ -333,6 +333,8 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
   late WritingDocument _document;
   bool _saving = false;
   bool _dirty = false;
+  final _typoStore = const WritingTypographyStore();
+  WritingTypography _typo = const WritingTypography();
 
   /// Markdown drafts can be flipped to a rendered preview.
   bool _previewing = false;
@@ -348,6 +350,33 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
     _bodyController = TextEditingController(text: _document.body);
     _titleController.addListener(_markDirty);
     _bodyController.addListener(_markDirty);
+    _loadTypo();
+  }
+
+  Future<void> _loadTypo() async {
+    // Skip in widget tests: path_provider + timeout leaves a pending timer.
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
+    try {
+      final typo = await _typoStore.load().timeout(const Duration(seconds: 2));
+      if (mounted) setState(() => _typo = typo);
+    } catch (_) {}
+  }
+
+  Future<void> _applyTypo(WritingTypography next) async {
+    setState(() => _typo = next);
+    try {
+      await _typoStore.save(next);
+    } catch (_) {}
+  }
+
+  void _showTypoSheet() {
+    showCupertinoModalPopup<void>(
+      context: context,
+      builder: (ctx) => _WritingTypoSheet(
+        initial: _typo,
+        onChanged: _applyTypo,
+      ),
+    );
   }
 
   @override
@@ -529,6 +558,12 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
             CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               minimumSize: const Size(40, 40),
+              onPressed: _showTypoSheet,
+              child: const Icon(CupertinoIcons.textformat_size, size: 20),
+            ),
+            CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              minimumSize: const Size(40, 40),
               onPressed: _confirmDelete,
               child: Icon(
                 CupertinoIcons.delete,
@@ -634,7 +669,8 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
                 maxLines: 1,
                 style: TextStyle(
                   color: ink,
-                  fontSize: 20,
+                  fontSize: (_typo.fontSize + 4).clamp(16.0, 32.0),
+                  fontFamily: _typo.fontFamily,
                   fontWeight: FontWeight.w600,
                 ),
                 placeholderStyle: TextStyle(
@@ -657,7 +693,13 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
                       expands: true,
                       textAlignVertical: TextAlignVertical.top,
                       keyboardType: TextInputType.multiline,
-                      style: TextStyle(color: ink, fontSize: 16, height: 1.65),
+                      style: TextStyle(
+                        color: ink,
+                        fontSize: _typo.fontSize,
+                        fontFamily: _typo.fontFamily,
+                        fontWeight: _typo.fontWeight,
+                        height: 1.65,
+                      ),
                       decoration: const BoxDecoration(),
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                     ),
@@ -677,6 +719,211 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Bottom sheet: font family, size, and weight for the writing editor.
+class _WritingTypoSheet extends StatelessWidget {
+  const _WritingTypoSheet({required this.initial, required this.onChanged});
+
+  final WritingTypography initial;
+  final ValueChanged<WritingTypography> onChanged;
+
+  static const _families = <String?>[
+    null,
+    'serif',
+    'monospace',
+    'sans-serif',
+    'Cursive',
+  ];
+
+  static const _familyLabels = <String>[
+    '默认',
+    '衬线',
+    '等宽',
+    '无衬线',
+    '手写',
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = VellumTheme.inkOf(context);
+    final muted = VellumTheme.mutedOf(context);
+    final accent = VellumTheme.accentOf(context);
+    final card = VellumTheme.cardOf(context);
+    return SafeArea(
+      top: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        decoration: BoxDecoration(
+          color: card,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '排版',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: ink,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text('字体', style: TextStyle(fontSize: 12, color: muted)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var i = 0; i < _families.length; i++)
+                  _chip(
+                    context,
+                    label: _familyLabels[i],
+                    selected: initial.fontFamily == _families[i],
+                    onTap: () => onChanged(
+                      initial.copyWith(
+                        fontFamily: _families[i],
+                        clearFont: _families[i] == null,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Text('字号', style: TextStyle(fontSize: 12, color: muted)),
+            Row(
+              children: [
+                CupertinoButton(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(36, 36),
+                  onPressed: () => onChanged(
+                    initial.copyWith(
+                      fontSize: (initial.fontSize - 1).clamp(
+                        WritingTypography.minSize,
+                        WritingTypography.maxSize,
+                      ),
+                    ),
+                  ),
+                  child: Text('A−', style: TextStyle(color: ink)),
+                ),
+                Expanded(
+                  child: CupertinoSlider(
+                    value: initial.fontSize.clamp(
+                      WritingTypography.minSize,
+                      WritingTypography.maxSize,
+                    ),
+                    min: WritingTypography.minSize,
+                    max: WritingTypography.maxSize,
+                    onChanged: (v) =>
+                        onChanged(initial.copyWith(fontSize: v)),
+                  ),
+                ),
+                CupertinoButton(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(36, 36),
+                  onPressed: () => onChanged(
+                    initial.copyWith(
+                      fontSize: (initial.fontSize + 1).clamp(
+                        WritingTypography.minSize,
+                        WritingTypography.maxSize,
+                      ),
+                    ),
+                  ),
+                  child: Text('A+', style: TextStyle(color: ink)),
+                ),
+                SizedBox(
+                  width: 36,
+                  child: Text(
+                    '${initial.fontSize.round()}',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: muted),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text('字重', style: TextStyle(fontSize: 12, color: muted)),
+            const SizedBox(height: 8),
+            CupertinoSlidingSegmentedControl<int>(
+              groupValue: initial.weightIndex,
+              children: {
+                for (var i = 0; i < WritingTypography.weightLabels.length; i++)
+                  i: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Text(WritingTypography.weightLabels[i]),
+                  ),
+              },
+              onValueChanged: (v) {
+                if (v == null) return;
+                onChanged(initial.copyWith(weightIndex: v));
+              },
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: .08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '示例文字 The quick brown fox',
+                style: TextStyle(
+                  color: ink,
+                  fontSize: initial.fontSize,
+                  fontFamily: initial.fontFamily,
+                  fontWeight: initial.fontWeight,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            CupertinoButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('完成', style: TextStyle(color: accent)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(
+    BuildContext context, {
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final accent = VellumTheme.accentOf(context);
+    final ink = VellumTheme.inkOf(context);
+    return CupertinoButton(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      minimumSize: const Size(0, 32),
+      onPressed: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? accent.withValues(alpha: .15)
+              : VellumTheme.cardOf(context),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: selected ? accent : VellumTheme.lineOf(context),
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            color: selected ? accent : ink,
+            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+          ),
         ),
       ),
     );
