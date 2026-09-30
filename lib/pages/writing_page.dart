@@ -369,6 +369,19 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
     } catch (_) {}
   }
 
+  /// 小说模式：一键排版正文（段首两格 + 段间空行）。
+  void _applyNovelMode() {
+    final src = _bodyController.text;
+    final formatted = applyNovelFormatting(src);
+    if (formatted == src) {
+      _showToast('已是小说排版，无需调整');
+      return;
+    }
+    _bodyController.text = formatted;
+    _markDirty();
+    _showToast('已套用小说排版：段首缩进 + 段距');
+  }
+
   void _showTypoSheet() {
     showCupertinoModalPopup<void>(
       context: context,
@@ -387,7 +400,7 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
   }
 
   void _markDirty() {
-    if (_dirty) return;
+    // Rebuild every keystroke so the footer 字/词 count stays live.
     setState(() => _dirty = true);
   }
 
@@ -562,6 +575,19 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
               child: const Icon(CupertinoIcons.textformat_size, size: 20),
             ),
             CupertinoButton(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              minimumSize: const Size(40, 40),
+              onPressed: _applyNovelMode,
+              child: Text(
+                '小说',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: VellumTheme.accentOf(context),
+                ),
+              ),
+            ),
+            CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               minimumSize: const Size(40, 40),
               onPressed: _confirmDelete,
@@ -698,7 +724,7 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
                         fontSize: _typo.fontSize,
                         fontFamily: _typo.fontFamily,
                         fontWeight: _typo.fontWeight,
-                        height: 1.65,
+                        height: 1.75,
                       ),
                       decoration: const BoxDecoration(),
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),

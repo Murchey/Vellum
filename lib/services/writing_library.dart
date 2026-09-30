@@ -20,6 +20,67 @@ enum WritingFormat {
       );
 }
 
+/// 小说模式排版：段首两格缩进 + 段落之间空一行。
+/// 不改标题、列表、引用、代码块；已缩进的段落保持原样。
+String applyNovelFormatting(String source) {
+  final normalized = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  final lines = normalized.split('\n');
+  final out = <String>[];
+  var inFence = false;
+  var buffer = <String>[];
+
+  void flushParagraph() {
+    if (buffer.isEmpty) return;
+    final first = buffer.first;
+    final body = buffer.join('\n');
+    buffer = <String>[];
+    // Leave markers / already-indented prose untouched.
+    final isProse =
+        first.trim().isNotEmpty &&
+        !_novelSkipPrefix.hasMatch(first) &&
+        !first.startsWith('　') &&
+        !RegExp(r'^ {2,}').hasMatch(first) &&
+        !first.startsWith('\t');
+    if (isProse) {
+      out.add('　　$body');
+    } else {
+      out.add(body);
+    }
+    out.add(''); // blank line = paragraph gap
+  }
+
+  for (final line in lines) {
+    if (line.trim().startsWith('```')) {
+      flushParagraph();
+      inFence = !inFence;
+      out.add(line);
+      continue;
+    }
+    if (inFence) {
+      out.add(line);
+      continue;
+    }
+    if (line.trim().isEmpty) {
+      flushParagraph();
+      // collapse extra blank lines later
+      continue;
+    }
+    buffer.add(line);
+  }
+  flushParagraph();
+
+  // Normalize: single blank line between blocks. Only trim newlines —
+  // String.trim() would eat the leading `　　` (U+3000 is whitespace).
+  var joined = out.join('\n').replaceAll(RegExp(r'\n{3,}'), '\n\n');
+  joined = joined.replaceAll(RegExp(r'^\n+'), '');
+  joined = joined.replaceAll(RegExp(r'\n+$'), '');
+  return joined;
+}
+
+final RegExp _novelSkipPrefix = RegExp(
+  r'^(#{1,6}\s|>|[-*+]\s|\d+[.、)]\s|```|~~~)',
+);
+
 /// Editor typography for the writing tab (shared across drafts).
 class WritingTypography {
   const WritingTypography({
