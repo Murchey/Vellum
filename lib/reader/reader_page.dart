@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/book_importer.dart';
@@ -50,10 +51,10 @@ class ReaderPage extends StatefulWidget {
   });
 
   @override
-  State<ReaderPage> createState() => _ReaderPageState();
+  State<ReaderPage> createState() => ReaderPageState();
 }
 
-class _ReaderPageState extends State<ReaderPage>
+class ReaderPageState extends State<ReaderPage>
     with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   late double _fontSize;
   late String _readerFontFamily;
@@ -471,6 +472,8 @@ class _ReaderPageState extends State<ReaderPage>
 
   @override
   void dispose() {
+    // Stops the background pagination loop before it schedules another yield.
+    _paginateBusy = false;
     WidgetsBinding.instance.removeObserver(this);
     _tapTimer?.cancel();
     _ttsStateSub?.cancel();
@@ -979,15 +982,53 @@ class _ReaderPageState extends State<ReaderPage>
   /// small slices so first paint stays fast; extend as the reader advances.
   void _ensurePages(BuildContext context) {
     if (_layoutNeedsReset(context)) {
+      // Read the anchor from the **old** pager, before it is replaced: the page
+      // list it holds is the only record of what the reader is looking at. Doing
+      // this after the reset left the probe with one empty page, so the anchor
+      // silently fell back to the paragraph the book was opened at — the reader
+      // jumped back to the start of the book on every font switch.
+      final anchor = _readingMode == ReadingMode.page
+          ? _currentPageParagraphOrInitial()
+          : _currentParagraph;
       _pager = ProgressiveBookPager(widget.book, _pageLayoutConfig(context));
       _recordLayoutMetrics(context);
-      final resumePara = widget.initialState.paragraphIndex.clamp(
+      final resumePara = anchor.clamp(
         0,
         widget.book.paragraphs.isEmpty ? 0 : widget.book.paragraphs.length - 1,
       );
-      _pager.paginateThrough(resumePara);
-      final resumePage = _pager.exactPageForParagraph(resumePara) ?? 0;
-      _pager.paginateUntilPages(resumePage + _pagesAhead);
+      // Re-anchoring is a sequential text measurement from paragraph 0, so its
+      // cost scales with how far into the book the reader is. A 二十四史-sized book
+      // needs minutes of it, so past [_anchorFoldParagraphs] the pager starts its
+      // window at the paragraph being read instead: the page shown is exact, only
+      // absolute page numbers become estimates.
+      final anchorWatch = Stopwatch()..start();
+      final int resumePage;
+      if (resumePara > _anchorFoldParagraphs) {
+        _pager.paginateFrom(resumePara, minPages: _pagesAhead);
+        resumePage = 0;
+      } else {
+        _pager.paginateThrough(resumePara);
+        resumePage = _pager.exactPageForParagraph(resumePara) ?? 0;
+        _pager.paginateUntilPages(resumePage + _pagesAhead);
+      }
+      anchorWatch.stop();
+      if (kDebugMode && anchorWatch.elapsedMilliseconds >= 150) {
+        debugPrint(
+          'Vellum re-anchor (font/layout change): paragraph $resumePara '
+          '→ page $resumePage of ${widget.book.paragraphs.length} '
+          '${_pager.isAnchored ? '(anchored window)' : '(exact)'} '
+          'in ${anchorWatch.elapsedMilliseconds}ms',
+        );
+      }
+      // The pager was rebuilt, so the page index we were on is no longer valid:
+      // follow the anchor instead of showing page 0.
+      if (resumePage != _currentPage) {
+        _currentPage = resumePage;
+        _requestedPage = resumePage;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _jumpToPageExact(resumePage);
+        });
+      }
     } else {
       final target = _currentPage + _pagesAhead;
       if (!_pager.fullyPaginated && _pager.pageCount < target) {
@@ -996,6 +1037,8 @@ class _ReaderPageState extends State<ReaderPage>
     }
   }
 
+  /// Extends the pager in short, interruptible slices, yielding to the event
+  /// loop between them so a long fill never monopolises a frame.
   void _paginateAsync({required int targetPages}) {
     if (_paginateBusy) return;
     _paginateBusy = true;
@@ -1004,17 +1047,21 @@ class _ReaderPageState extends State<ReaderPage>
         if (_pager.fullyPaginated || _pager.pageCount >= targetPages) break;
         final sw = Stopwatch()..start();
         while (mounted &&
+            _paginateBusy &&
             !_pager.fullyPaginated &&
             _pager.pageCount < targetPages &&
             sw.elapsedMilliseconds < 12) {
           _pager.paginateSlice(maxParagraphs: 20);
         }
-        if (!mounted) break;
+        if (!mounted || !_paginateBusy) break;
         setState(() {});
         if (_pager.fullyPaginated || _pager.pageCount >= targetPages) break;
+        // Never yield once the reader is gone, or the timer outlives its widget.
+        if (!mounted || !_paginateBusy) break;
         await Future<void>.delayed(Duration.zero);
       }
-      _paginateBusy = false;
+      // Cancelled by dispose(): the flag was already cleared for us.
+      if (mounted) _paginateBusy = false;
     });
   }
 
@@ -1036,7 +1083,78 @@ class _ReaderPageState extends State<ReaderPage>
         .paragraphIndex;
   }
 
+  /// Test hooks: the page-mode reading position has to survive a re-layout, and
+  /// that is easiest to assert from the page state itself.
+  @visibleForTesting
+  int get debugCurrentPageParagraph => _currentPageParagraphOrInitial();
+
+  @visibleForTesting
+  int get debugPageCount => _pageCount;
+
+  @visibleForTesting
+  void debugJumpToPage(int page) => _jumpToParagraph(
+    _pages.isEmpty
+        ? 0
+        : _pages[page.clamp(0, _pages.length - 1)].first.paragraphIndex,
+  );
+
+  @visibleForTesting
+  void debugSetFontSize(double value) => setState(() => _fontSize = value);
+
+  /// Paragraph the reader is looking at right now, used to re-anchor after a
+  /// re-layout. Falls back to the saved paragraph when the pager is not built
+  /// yet, where the page index means nothing.
+  int _currentPageParagraphOrInitial() {
+    if (_pages.isEmpty) return widget.initialState.paragraphIndex;
+    var index = _currentPage.clamp(0, _pages.length - 1);
+    // A page jump made through the controller (`jumpToPage`) does not fire
+    // `PageView.onPageChanged`, so `_currentPage` can lag the page actually on
+    // screen. Trust the controller — it is what the reader is looking at.
+    final live = _pageController.hasClients ? _pageController.page : null;
+    if (live != null && live.round() != index) {
+      final livePage = live.round().clamp(0, _pages.length - 1);
+      if (!_pager.pageIsEmpty(livePage)) index = livePage;
+    }
+    // A page can legitimately carry no text (an image-only or blank spread), and
+    // the pager reports 0 for it. Anchoring on that sent the reader back to the
+    // first page after a font switch, so the pager walks back to the nearest
+    // page that actually has content.
+    return _pager.firstParagraphOfPage(index) ??
+        widget.initialState.paragraphIndex;
+  }
+
+  /// Paragraph index beyond which a re-layout (or a jump) starts a new
+  /// pagination window at the target instead of measuring from the top of the
+  /// book. Below this the exact path is fast enough (tens of milliseconds); at
+  /// 二十四史 size the exact path costs minutes, which is what made jumping stall
+  /// and sometimes get the process killed.
+  static const int _anchorFoldParagraphs = 20000;
+
+  /// Page of the current pagination window that shows [paragraphIndex].
+  ///
+  /// While the pager is anchored, this re-anchors the window when the target lies
+  /// before it, and otherwise extends forward. The result is a local page index
+  /// that is safe for the page view; the book-wide number comes from
+  /// `ProgressiveBookPager.globalPageFor`.
   int _pageForParagraph(int paragraphIndex) {
+    final total = widget.book.paragraphs.length;
+    if (_pager.isAnchored) {
+      if (paragraphIndex < _pager.anchorParagraph) {
+        _pager.paginateFrom(paragraphIndex, minPages: _pagesAhead);
+      } else {
+        _pager.paginateThrough(paragraphIndex);
+      }
+      final exact = _pager.exactPageForParagraph(paragraphIndex);
+      if (exact != null) return exact.clamp(0, _pager.pageCount - 1);
+      return (_pager.pageRefForParagraph(paragraphIndex).page1 - 1).clamp(
+        0,
+        _pager.pageCount - 1,
+      );
+    }
+    if (total > 0 && paragraphIndex > _anchorFoldParagraphs) {
+      _pager.paginateFrom(paragraphIndex, minPages: _pagesAhead);
+      return 0;
+    }
     if (paragraphIndex > _pager.nextParagraph) {
       _pager.paginateThrough(paragraphIndex);
     }
@@ -1157,20 +1275,39 @@ class _ReaderPageState extends State<ReaderPage>
   /// Fanqie bottom indicator: page number only (no percent / paragraph).
   String get _pageProgress {
     if (_readingMode == ReadingMode.page) {
-      final total = _pager.estimatedTotalPageCount;
-      final current = (_currentPage + 1).clamp(1, total);
-      return _pager.fullyPaginated ? '$current / $total' : '$current / ~$total';
+      final total = _bookPageCount;
+      final current = _pageNumberOf(_currentPage).clamp(1, total);
+      return _pager.fullyPaginated && !_pager.isAnchored
+          ? '$current / $total'
+          : '$current / ~$total';
     }
     final percent = (_progress * 100).clamp(0, 100).round();
     return '$percent%';
   }
 
+  /// Book-wide page count: exact when the pager has measured the whole book,
+  /// otherwise the character-ratio estimate (an anchored window only knows its
+  /// own pages).
+  int get _bookPageCount {
+    if (!_pager.isAnchored) return _pager.estimatedTotalPageCount;
+    // The footer and the progress bar are the only consumers, and they are built
+    // once per frame: widen the sample here so the number settles instead of
+    // drifting as the reader turns pages.
+    _pager.calibrateEstimate();
+    return _pager.estimatedGlobalPageCount;
+  }
+
+  /// Book-wide 1-based page number for a page of the current window.
+  int _pageNumberOf(int page) =>
+      _pager.isAnchored ? _pager.globalPageFor(page) : page + 1;
+
   String get _batteryText => _batteryLevel < 0 ? '' : '$_batteryLevel%';
+
   double get _progress {
     if (_readingMode == ReadingMode.page) {
-      final total = _pager.estimatedTotalPageCount;
+      final total = _bookPageCount;
       if (total <= 1) return 0;
-      return (_currentPage / (total - 1)).clamp(0.0, 1.0);
+      return ((_pageNumberOf(_currentPage) - 1) / (total - 1)).clamp(0.0, 1.0);
     }
     if (!_scrollController.hasClients) return 0;
     final position = _scrollController.position;
@@ -1202,9 +1339,10 @@ class _ReaderPageState extends State<ReaderPage>
       final totalParas = widget.book.paragraphs.length;
       if (totalParas <= 0) return;
       final para = (target * (totalParas - 1)).round().clamp(0, totalParas - 1);
-      // Measure through the destination so TOC/page numbers stay consistent.
-      _pager.paginateThrough(para);
-      final page = _pageForParagraph(para);
+      // Past the anchor threshold this jumps the pagination window to the target
+      // instead of measuring the whole prefix — the difference between an
+      // instant seek and a minute of blocked UI in a 二十四史-sized book.
+      final page = _pageForParagraph(para).clamp(0, _pageCount - 1);
       _paginateAsync(targetPages: page + _pagesAhead);
       setState(() {
         _currentPage = page;

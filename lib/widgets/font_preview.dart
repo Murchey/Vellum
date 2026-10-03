@@ -1,16 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/services.dart';
 
 import '../services/book_library.dart';
+import '../services/font_registry.dart';
 
 /// Renders an imported font using the exact runtime family that is assigned
 /// when it is selected. The preview binds that family before loading finishes;
-/// Flutter replaces the fallback glyphs as soon as [FontLoader] completes.
+/// Flutter replaces the fallback glyphs as soon as the registration completes.
+///
+/// Registration goes through [FontRegistry] and is deferred a moment. A picker
+/// sheet with a dozen imported CJK fonts used to register every row it built at
+/// once, and each registration permanently costs the engine ≈1.9× the font
+/// file size — the memory that made font switching end in a crash. Deferring
+/// also means rows scrolled straight past never register at all.
 class FontPreview extends StatefulWidget {
   const FontPreview({
     required this.font,
     this.compact = false,
     this.ink,
+    this.defer = const Duration(milliseconds: 180),
     super.key,
   });
 
@@ -21,15 +30,20 @@ class FontPreview extends StatefulWidget {
   /// picker passes the active paper's ink so night/charcoal papers stay right.
   final Color? ink;
 
+  /// How long the row must stay on screen before it asks for its font.
+  final Duration defer;
+
   @override
   State<FontPreview> createState() => _FontPreviewState();
 }
 
 class _FontPreviewState extends State<FontPreview> {
+  Timer? _defer;
+
   @override
   void initState() {
     super.initState();
-    _loadFont();
+    _scheduleLoad();
   }
 
   @override
@@ -37,18 +51,35 @@ class _FontPreviewState extends State<FontPreview> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.font.name != widget.font.name ||
         oldWidget.font.family != widget.font.family) {
-      _loadFont();
+      _scheduleLoad();
     }
+  }
+
+  @override
+  void dispose() {
+    _defer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleLoad() {
+    _defer?.cancel();
+    // Already registered: the row paints in the real face with no I/O at all.
+    if (FontRegistry.isRegistered(widget.font.family)) return;
+    if (widget.defer == Duration.zero) {
+      _loadFont();
+      return;
+    }
+    _defer = Timer(widget.defer, () {
+      if (mounted) _loadFont();
+    });
   }
 
   Future<void> _loadFont() async {
     try {
       final bytes = await const BookLibrary().loadFontByName(widget.font.name);
       if (bytes == null) return;
-      final loader = FontLoader(widget.font.family)
-        ..addFont(Future.value(ByteData.sublistView(bytes)));
-      await loader.load();
-      if (mounted) setState(() {});
+      final registered = await FontRegistry.load(widget.font.family, bytes);
+      if (registered && mounted) setState(() {});
     } catch (_) {
       // The font row remains legible via the platform fallback if invalid.
     }

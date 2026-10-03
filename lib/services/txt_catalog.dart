@@ -78,7 +78,7 @@ enum TxtCatalogStatus { ready, synthetic, pending }
 
 /// Byte-offset catalog for a TXT book.
 class TxtCatalog {
-  const TxtCatalog({
+  TxtCatalog({
     required this.encoding,
     required this.chapters,
     required this.status,
@@ -89,13 +89,47 @@ class TxtCatalog {
   final List<TxtChapterRef> chapters;
   final TxtCatalogStatus status;
 
-  int get totalParagraphs {
+  /// Prefix sums, built once on first use.
+  ///
+  /// Paragraph indices are looked up per paragraph while paginating, so the
+  /// obvious "walk the chapter list" implementations made every
+  /// `book.paragraphs[i]` cost O(chapters) — on a several-thousand-chapter web
+  /// novel that is what turned a re-layout (font switch) into seconds of frozen
+  /// UI thread and, eventually, a killed process.
+  List<int>? _starts;
+
+  /// End paragraph index of each chapter (a running total).
+  List<int>? _ends;
+
+  /// Start paragraph index of each chapter plus a final total, one entry longer
+  /// than [chapters].
+  List<int> get _startTable => _starts ??= _buildStarts();
+
+  /// Running paragraph total after each chapter, cached for [totalParagraphs].
+  List<int> get _endTable => _ends ??= _buildEnds();
+
+  List<int> _buildStarts() {
+    final table = List<int>.filled(chapters.length + 1, 0);
     var sum = 0;
-    for (final chapter in chapters) {
-      sum += chapter.paragraphCount;
+    for (var i = 0; i < chapters.length; i++) {
+      table[i] = sum;
+      sum += chapters[i].paragraphCount;
     }
-    return sum;
+    table[chapters.length] = sum;
+    return table;
   }
+
+  List<int> _buildEnds() {
+    final table = List<int>.filled(chapters.length, 0);
+    var sum = 0;
+    for (var i = 0; i < chapters.length; i++) {
+      sum += chapters[i].paragraphCount;
+      table[i] = sum;
+    }
+    return table;
+  }
+
+  int get totalParagraphs => _startTable[chapters.length];
 
   int get totalCharCount {
     var sum = 0;
@@ -109,30 +143,39 @@ class TxtCatalog {
 
   /// Global paragraph index at which [chapterIndex] begins.
   int paragraphStartOf(int chapterIndex) {
-    var sum = 0;
-    for (var i = 0; i < chapterIndex && i < chapters.length; i++) {
-      sum += chapters[i].paragraphCount;
-    }
-    return sum;
+    if (chapters.isEmpty) return 0;
+    final table = _startTable;
+    return table[chapterIndex.clamp(0, chapters.length)];
   }
 
   /// Chapter that contains the given global paragraph index.
+  ///
+  /// Binary search over the cached prefix sums: the chapter list is ordered, so
+  /// the previous linear walk was pure overhead on every paragraph access.
   TxtChapterRef chapterForParagraph(int paragraphIndex) {
-    var sum = 0;
-    for (final chapter in chapters) {
-      final end = sum + chapter.paragraphCount;
-      if (paragraphIndex < end) return chapter;
-      sum = end;
+    if (chapters.isEmpty) {
+      return const TxtChapterRef(
+        index: 0,
+        title: '',
+        startOffset: 0,
+        byteLength: 0,
+        paragraphCount: 0,
+      );
     }
-    return chapters.isEmpty
-        ? const TxtChapterRef(
-            index: 0,
-            title: '',
-            startOffset: 0,
-            byteLength: 0,
-            paragraphCount: 0,
-          )
-        : chapters.last;
+    final ends = _endTable;
+    var low = 0;
+    var high = chapters.length - 1;
+    var index = high;
+    while (low <= high) {
+      final mid = (low + high) >> 1;
+      if (paragraphIndex < ends[mid]) {
+        index = mid;
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+    return chapters[index];
   }
 
   List<MapEntry<int, String>> get tocEntries => [
@@ -176,7 +219,7 @@ TxtCatalog scanTxtCatalog(
   int maxTitleLength = 40,
 }) {
   if (bytes.isEmpty) {
-    return const TxtCatalog(
+    return TxtCatalog(
       encoding: 'utf-8',
       chapters: [],
       status: TxtCatalogStatus.synthetic,

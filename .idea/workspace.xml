@@ -4,7 +4,14 @@
     <option name="autoReloadType" value="NONE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="d06d7fbd-f527-471e-9b91-d12b0b4e9b10" name="Changes" comment="" />
+    <list default="true" id="d06d7fbd-f527-471e-9b91-d12b0b4e9b10" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/lib/app.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/app.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_page.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_page.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/reader/reader_pagination.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/reader/reader_pagination.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/services/txt_catalog.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/services/txt_catalog.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/lib/widgets/font_preview.dart" beforeDir="false" afterPath="$PROJECT_DIR$/lib/widgets/font_preview.dart" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/test/reader_pagination_fill_test.dart" beforeDir="false" afterPath="$PROJECT_DIR$/test/reader_pagination_fill_test.dart" afterDir="false" />
+    </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />

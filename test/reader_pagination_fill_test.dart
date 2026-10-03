@@ -46,22 +46,40 @@ void main() {
       paragraphs: ['前一段。', long],
     );
     final pager = ProgressiveBookPager(book, config());
-    pager.paginateUntilPages(3);
-    expect(pager.pages.length, greaterThanOrEqualTo(2));
-    // Every continuation piece (not the paragraph's first fragment) is compact.
-    for (final page in pager.pages) {
+    while (pager.paginateSlice(maxParagraphs: 25)) {}
+    expect(pager.pageCount, greaterThanOrEqualTo(2));
+
+    final page0 = pager.pages.first;
+    expect(page0.length, 2, reason: 'the short paragraph plus the first slice');
+
+    // A paragraph split across pages must hand over every character once: the
+    // slice bounds are measured on indent-prefixed display text, and the first
+    // fragment used to lose that prefix on the way out.
+    final whole = page0
+        .where((f) => f.paragraphIndex == 1)
+        .map((f) => f.text)
+        .join();
+    final rest = pager.pages
+        .skip(1)
+        .expand((page) => page)
+        .where((f) => f.paragraphIndex == 1)
+        .map((f) => f.text)
+        .join();
+    expect(whole + rest, long);
+
+    // Continuations (anything but a paragraph's first fragment) skip the
+    // inter-paragraph 22px step.
+    expect(page0.last.paragraphIndex, 1);
+    expect(page0.last.compactPadding, isFalse);
+    expect(pager.pages.skip(1).expand((page) => page).isNotEmpty, isTrue);
+    for (final page in pager.pages.skip(1)) {
       for (final fragment in page) {
-        if (fragment.paragraphIndex == 1 && fragment.text != long) {
-          // split pieces of paragraph 1
-        }
+        expect(
+          fragment.compactPadding,
+          isTrue,
+          reason: 'a continuation must not charge the paragraph gap',
+        );
       }
     }
-    final continues = pager.pages
-        .expand((p) => p)
-        .where((f) => f.paragraphIndex == 1 && f.text.isNotEmpty)
-        .toList();
-    expect(continues.length, greaterThan(1));
-    expect(continues.first.compactPadding, isFalse);
-    expect(continues.skip(1).every((f) => f.compactPadding), isTrue);
   });
 }

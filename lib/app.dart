@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart' show Uint8List;
 
 import 'package:file_picker/file_picker.dart';
 
@@ -23,6 +23,7 @@ import 'services/book_importer.dart';
 import 'services/book_import_service.dart' show BookImportService;
 
 import 'services/book_library.dart';
+import 'services/font_registry.dart';
 import 'services/reading_stats.dart';
 
 import 'theme/vellum_theme.dart';
@@ -90,10 +91,10 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
 
     final family = 'Font_${name.hashCode.abs()}';
 
-    final loader = FontLoader(family)
-      ..addFont(Future.value(ByteData.sublistView(bytes)));
-
-    await loader.load();
+    // Registers at most once per family. A repeated registration does not
+    // replace the previous one — the engine keeps every copy for the life of
+    // the process, which is what drained the heap during font switching.
+    await FontRegistry.load(family, bytes);
 
     if (!mounted) return;
 
@@ -142,6 +143,10 @@ class _VellumAppState extends State<VellumApp> with WidgetsBindingObserver {
 
   Future<void> _deleteFont(String name) async {
     await _library.deleteFontByName(name);
+
+    // The engine cannot unload a family, but dropping the bookkeeping lets a
+    // later re-import of the same name register its new bytes.
+    FontRegistry.forget('Font_${name.hashCode.abs()}');
 
     if (_activeFontName == name) {
       _activeFontName = '';
