@@ -154,6 +154,11 @@ enum _AbovePanel { none, catalog, settings }
 class _ReaderMenuState extends State<ReaderMenu>
     with SingleTickerProviderStateMixin {
   _AbovePanel _panel = _AbovePanel.none;
+
+  /// 全文搜索 is open inside the catalogue panel. While it is, the sheet
+  /// expands to the viewport so the result list is not a stripe above the
+  /// seek bar (the soft keyboard is up on a phone).
+  var _searchActive = false;
   DateTime? _lastActionAt;
   late final AnimationController _chromeAnim = AnimationController(
     vsync: this,
@@ -206,12 +211,18 @@ class _ReaderMenuState extends State<ReaderMenu>
   void _togglePanel(_AbovePanel panel) {
     // No debounce on panel open/close — a blocked second tap felt like the
     // menu was broken. Only day/night theme flip stays lightly throttled.
-    setState(() => _panel = _panel == panel ? _AbovePanel.none : panel);
+    setState(() {
+      _panel = _panel == panel ? _AbovePanel.none : panel;
+      if (_panel != _AbovePanel.catalog) _searchActive = false;
+    });
   }
 
   void _closePanel() {
     if (_panel != _AbovePanel.none) {
-      setState(() => _panel = _AbovePanel.none);
+      setState(() {
+        _panel = _AbovePanel.none;
+        _searchActive = false;
+      });
     }
   }
 
@@ -271,18 +282,35 @@ class _ReaderMenuState extends State<ReaderMenu>
         child: LayoutBuilder(
           builder: (context, constraints) {
             final available = constraints.maxHeight;
-            // A squeezed viewport (keyboard up) has to give the sheet room: the
-            // chrome and band shrink before the panel does.
-            final compact = available < 420;
-            final chrome = compact
+            // CupertinoPageScaffold consumes viewInsets (zeros the bottom) and
+            // shrinks its body by the keyboard, so this box is short while
+            // `MediaQuery.size` still reports the full screen. A short box
+            // here means the keyboard is up — or search is open, which is the
+            // same layout problem: the reader wants the sheet, not the seek bar.
+            final mediaHeight = MediaQuery.sizeOf(context).height;
+            final squeezed = mediaHeight - available > 120;
+            final expandSheet =
+                _panel != _AbovePanel.none && (_searchActive || squeezed);
+            final compact = expandSheet || available < 420;
+            final chrome = expandSheet
+                ? 0.0
+                : compact
                 ? (available * .22).clamp(0.0, 90.0)
                 : bottomChrome;
-            final band = compact ? available * .16 : bandTop;
+            final band = expandSheet
+                ? 0.0
+                : compact
+                ? available * .16
+                : bandTop;
             final room = (available - band - chrome).clamp(
               0.0,
               double.infinity,
             );
-            final desired = (available * .5).clamp(0.0, double.infinity);
+            // Half-sheet normally; while typing it must fill the space above
+            // the keyboard or the result list collapses to a stripe.
+            final desired = expandSheet
+                ? room
+                : (available * .5).clamp(0.0, double.infinity);
             final panelHeight = desired
                 .clamp(
                   room < ReaderDirectoryPanel.minPanelHeight
@@ -292,6 +320,9 @@ class _ReaderMenuState extends State<ReaderMenu>
                 )
                 .clamp(0.0, room);
             final panelTop = available - chrome - panelHeight;
+            // Chrome paints over the sheet in the stack below; when the panel
+            // owns the full viewport it would sit under the bars, so hide them.
+            final showChrome = !expandSheet;
 
             return Stack(
               children: [
@@ -369,7 +400,7 @@ class _ReaderMenuState extends State<ReaderMenu>
                     ),
                   ),
 
-                if (chromeVisible)
+                if (chromeVisible && showChrome)
                   Positioned(
                     top: 0,
                     left: 0,
@@ -394,7 +425,7 @@ class _ReaderMenuState extends State<ReaderMenu>
                     ),
                   ),
 
-                if (chromeVisible)
+                if (chromeVisible && showChrome)
                   Positioned(
                     left: 0,
                     right: 0,
@@ -621,6 +652,10 @@ class _ReaderMenuState extends State<ReaderMenu>
         onRemoveBookmark: widget.onRemoveBookmark,
         onRemoveNote: widget.onRemoveNote,
         onClose: _closePanel,
+        onSearchingChanged: (searching) {
+          if (!mounted || _searchActive == searching) return;
+          setState(() => _searchActive = searching);
+        },
       ),
     );
   }

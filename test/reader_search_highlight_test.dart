@@ -1,5 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vellum/reader/reader_control_panels.dart';
 import 'package:vellum/reader/reader_controls.dart';
 import 'package:vellum/reader/reader_models.dart';
 import 'package:vellum/reader/reader_page.dart';
@@ -119,6 +120,46 @@ void main() {
         reason: 'search overflowed with a $keyboard px keyboard',
       );
     }
+  });
+
+  testWidgets('search with the keyboard up fills the viewport and drops chrome', (
+    tester,
+  ) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    const keyboard = 336.0;
+    const available = 844 - keyboard;
+    await pumpMenu(tester, height: available, keyboard: keyboard);
+
+    await tester.tap(find.text('目录').first);
+    await tester.pumpAndSettle();
+    final icon = find.byIcon(CupertinoIcons.search);
+    expect(icon, findsOneWidget);
+    await tester.tap(icon);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(CupertinoTextField), '天下');
+    await tester.pump(const Duration(milliseconds: 250));
+
+    // Tabs and the book name are chrome, not search UI: while typing they
+    // must not sit on top of the result list.
+    expect(find.text('书签'), findsNothing);
+    expect(find.text('笔记'), findsNothing);
+
+    // The query field and the summary stay on screen above the keyboard.
+    expect(find.byType(CupertinoTextField), findsOneWidget);
+    expect(find.textContaining('段'), findsWidgets);
+
+    // The sheet owns the whole remaining viewport (minus the grabber), so the
+    // result list is not a stripe above the seek bar. A half-sheet of an
+    // already-shrunk box used to leave ~120 px of results.
+    final panel = tester.getRect(find.byType(ReaderDirectoryPanel));
+    expect(
+      panel.height,
+      greaterThan(available * .85),
+      reason: 'search panel shrank to ${panel.height} with the keyboard up',
+    );
+
+    // And it still does not overflow that box.
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a search result marks the query inside the paragraph', (

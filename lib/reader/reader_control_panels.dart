@@ -30,16 +30,19 @@ class ReaderDirectoryPanel extends StatefulWidget {
     this.pageLabelForParagraph,
     this.bookTitle = '',
     this.surface,
+    this.onSearchingChanged,
     super.key,
   });
 
-  /// Height of the book-name line plus the tab row plus the query field.
+  /// Height of the book-name line plus the tab row.
   ///
-  /// Part of the panel's contract: [ReaderMenu] keeps the sheet at least as tall
-  /// as [minPanelHeight], because a sheet shorter than its own header is exactly
-  /// what overflows — and the soft keyboard is what makes a sheet that short.
+  /// Searching no longer shares this header — it uses [searchHeaderHeight] —
+  /// so this is the full (non-search) chrome. [ReaderMenu] keeps the sheet at
+  /// least as tall as [minPanelHeight], because a sheet shorter than its own
+  /// header is exactly what overflows — and the soft keyboard is what makes a
+  /// sheet that short.
   static double get headerHeight =>
-      _bookTitleHeight + _tabRowHeight + _searchRowHeight;
+      _bookTitleHeight + _tabRowHeight + 0.5;
 
   /// Header height the panel falls back to when the sheet is too short for the
   /// book-name line: a compact app bar, one row of tabs, their rule, and a small
@@ -61,6 +64,14 @@ class ReaderDirectoryPanel extends StatefulWidget {
   /// summary bar, with a little list left underneath.
   static double get minPanelHeight =>
       compactHeaderHeight + _searchSummaryHeight + _minBodyHeight;
+
+  /// Height of the search-only header (query field + 取消).
+  ///
+  /// While searching the tab row and book name are noise; this is all the
+  /// chrome the results list needs, so the list keeps the rest of the sheet.
+  static double get searchHeaderHeight => _searchRowHeight + _searchHeaderSlack;
+
+  static const double _searchHeaderSlack = 8;
 
   static const double _compactBarHeight = 46;
   static const double _compactTabHeight = 34;
@@ -101,6 +112,10 @@ class ReaderDirectoryPanel extends StatefulWidget {
   /// Panel background (reading paper). Ink is derived from this so night
   /// paper stays readable even when the app theme is light.
   final Color? surface;
+
+  /// Notifies the parent when 全文搜索 opens/closes, so the sheet can expand
+  /// for the keyboard instead of staying a half-screen card over the seek bar.
+  final ValueChanged<bool>? onSearchingChanged;
 
   @override
   State<ReaderDirectoryPanel> createState() => _ReaderDirectoryPanelState();
@@ -177,6 +192,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     _searchDebounce?.cancel();
     _focusLossTimer?.cancel();
     _searchFocus.removeListener(_onSearchFocusChanged);
+    if (_searching) widget.onSearchingChanged?.call(false);
     _scrollController.dispose();
     _searchScrollController.dispose();
     _searchController.dispose();
@@ -191,6 +207,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
       _results = SearchResults.empty;
       _activeHit = null;
     });
+    widget.onSearchingChanged?.call(true);
     // The query field mounts on the next frame, where its own `autofocus` claims
     // the caret and raises the keyboard. Asking the platform to show it from here
     // as well opened a second input session for the same field: Android finished
@@ -248,6 +265,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
       _results = SearchResults.empty;
       _activeHit = null;
     });
+    widget.onSearchingChanged?.call(false);
   }
 
   /// Restarts the debounce window; [_runSearch] does the actual scan.
@@ -428,6 +446,20 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
         // that slot. Below [headerHeight] the book-name line and the query field
         // no longer fit, so the panel drops to a compact header instead of
         // painting the black/yellow overflow stripes.
+        //
+        // Searching always uses the slim search header: tabs and the book name
+        // do not help while typing, and a full header plus the summary bar left
+        // the result list a stripe once the keyboard took the rest of the
+        // screen. One layout for the whole search session also avoids swapping
+        // headers mid-keyboard-animation (which drops the input connection).
+        if (_searching) {
+          return _searchLayout(
+            context,
+            ink: ink,
+            muted: muted,
+            accent: accent,
+          );
+        }
         if (constraints.maxHeight < headerHeight) {
           return _compactLayout(
             context,
@@ -455,6 +487,53 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
           ],
         );
       },
+    );
+  }
+
+  /// Search-only sheet: query field + 取消, then the results.
+  ///
+  /// Dropped book name and tabs so a keyboard-squeezed viewport still shows
+  /// a usable list instead of three rows of chrome over a stripe of results.
+  Widget _searchLayout(
+    BuildContext context, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: _searchField(
+                  context,
+                  ink: ink,
+                  muted: muted,
+                  accent: accent,
+                ),
+              ),
+              CupertinoButton(
+                padding: const EdgeInsets.only(left: 8, right: 8),
+                minimumSize: const Size(48, 36),
+                onPressed: _closeSearch,
+                child: Text('取消', style: TextStyle(color: accent)),
+              ),
+            ],
+          ),
+        ),
+        Container(height: 0.5, color: ink.withValues(alpha: .08)),
+        Expanded(
+          child: _buildSearchResults(
+            context,
+            ink: ink,
+            muted: muted,
+            accent: accent,
+          ),
+        ),
+      ],
     );
   }
 
@@ -523,16 +602,20 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
             ],
           ),
         ),
-        SizedBox(
-          height: ReaderDirectoryPanel._compactTabHeight,
-          child: _tabRow(
-            context,
-            ink: ink,
-            muted: muted,
-            accent: accent,
-            withTrailingControls: false,
+        // Tabs are not useful while typing a query; [_searchLayout] is the
+        // normal search path, and this is only the fallback if search opens
+        // mid-squeeze.
+        if (!_searching)
+          SizedBox(
+            height: ReaderDirectoryPanel._compactTabHeight,
+            child: _tabRow(
+              context,
+              ink: ink,
+              muted: muted,
+              accent: accent,
+              withTrailingControls: false,
+            ),
           ),
-        ),
         Container(height: 0.5, color: ink.withValues(alpha: .08)),
         Expanded(
           child: _body(
@@ -548,18 +631,15 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     );
   }
 
-  /// Height of the book-name line plus the tab row.
+  /// Height of the book-name line plus the tab row (non-search full header).
   ///
   /// Part of the panel's contract: [ReaderMenu] keeps the sheet at least this
   /// tall, because a sheet shorter than its own header is what overflows.
   static double get headerHeight =>
-      _bookTitleHeight + _tabRowHeight + _searchFieldHeight;
+      _bookTitleHeight + _tabRowHeight + 0.5;
 
   static const double _bookTitleHeight = 14 + 17 + 8;
   static const double _tabRowHeight = 44;
-
-  /// Height of the query field row (field + its padding).
-  static const double _searchFieldHeight = 36 + 14;
 
   /// Tabs, the search entry point, the order toggle and the close button.
   /// Shared by the full and the compact header; the compact bar already carries
@@ -718,32 +798,10 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
             ),
           ),
 
-        // 2) SlidingTabLayout-style tabs (Fanqie 16sp)
+        // 2) SlidingTabLayout-style tabs (Fanqie 16sp). Searching uses
+        // [_searchLayout] instead — tabs and the book name are not useful
+        // while typing a query.
         _tabRow(context, ink: ink, muted: muted, accent: accent),
-
-        // 2b) 全文搜索 field, replacing the tab row content while active.
-        if (_searching)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
-            child: Row(
-              children: [
-                Expanded(
-                  child: _searchField(
-                    context,
-                    ink: ink,
-                    muted: muted,
-                    accent: accent,
-                  ),
-                ),
-                CupertinoButton(
-                  padding: const EdgeInsets.only(left: 10),
-                  minimumSize: const Size(0, 36),
-                  onPressed: _closeSearch,
-                  child: Text('取消', style: TextStyle(color: accent)),
-                ),
-              ],
-            ),
-          ),
 
         // 3) Divider (Fanqie alj / item: 0.5dp)
         Container(height: 0.5, color: ink.withValues(alpha: .08)),
