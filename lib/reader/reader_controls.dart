@@ -43,6 +43,9 @@ class ReaderMenu extends StatefulWidget {
     required this.chapterPageLabels,
     required this.bookmarks,
     required this.notes,
+    this.paragraphs,
+    this.pageLabelForParagraph,
+    this.onJumpToSearchHit,
     required this.currentParagraph,
     required this.bookTitle,
     required this.onJumpToParagraph,
@@ -106,6 +109,16 @@ class ReaderMenu extends StatefulWidget {
   final Map<int, String> chapterPageLabels;
   final List<MapEntry<int, String>> bookmarks;
   final List<ReadingNote> notes;
+
+  /// Body text for 全文搜索 in the catalogue panel.
+  final List<String>? paragraphs;
+
+  /// Page label for a paragraph, shown on search results.
+  final String Function(int paragraphIndex)? pageLabelForParagraph;
+
+  /// Tapping a search result: jump to the paragraph, carrying the query so the
+  /// reader can highlight what was searched for.
+  final void Function(int paragraphIndex, String query)? onJumpToSearchHit;
   final int currentParagraph;
   final String bookTitle;
   final ValueChanged<int> onJumpToParagraph;
@@ -246,149 +259,170 @@ class _ReaderMenuState extends State<ReaderMenu>
     // while a catalog/settings sheet is open.
     final bottomChrome = 65.0 + 1 + 2 + 56 + 2 + bottomSafe;
     final bandTop = ReaderTopBar.height + topSafe;
-    final screenHeight = media.size.height;
-
-    // Catalog / settings: half-screen sheet, bottom-anchored on chrome.
-    // Minimum keeps first-level settings usable on short viewports/tests;
-    // content taller than the sheet scrolls inside the panel.
-    final maxPanel = (screenHeight - bandTop - bottomChrome).clamp(
-      200.0,
-      double.infinity,
-    );
-    final panelHeight = (screenHeight * 0.5).clamp(360.0, maxPanel);
-    final panelTop = screenHeight - bottomChrome - panelHeight;
 
     return Positioned.fill(
       child: IgnorePointer(
         ignoring: !widget.visible,
-        child: Stack(
-          children: [
-            // Middle-band dismiss target (page stays visible around chrome).
-            if (widget.visible)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: bandTop,
-                bottom: bottomChrome,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: _handleDismiss,
-                  child: const ColoredBox(color: Color(0x00000000)),
-                ),
-              ),
+        // The sheet is sized from the box this overlay is actually given, not
+        // from `MediaQuery.size`: when the soft keyboard resizes the window (or
+        // the scaffold above us does), the box is smaller than the media size,
+        // and computing from the media size put the sheet past its own bottom —
+        // the overflow block that appeared while typing.
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final available = constraints.maxHeight;
+            // A squeezed viewport (keyboard up) has to give the sheet room: the
+            // chrome and band shrink before the panel does.
+            final compact = available < 420;
+            final chrome = compact
+                ? (available * .22).clamp(0.0, 90.0)
+                : bottomChrome;
+            final band = compact ? available * .16 : bandTop;
+            final room = (available - band - chrome).clamp(
+              0.0,
+              double.infinity,
+            );
+            final desired = (available * .5).clamp(0.0, double.infinity);
+            final panelHeight = desired
+                .clamp(
+                  room < ReaderDirectoryPanel.minPanelHeight
+                      ? room
+                      : ReaderDirectoryPanel.minPanelHeight,
+                  room,
+                )
+                .clamp(0.0, room);
+            final panelTop = available - chrome - panelHeight;
 
-            // Half-screen sheet above the action bar (seek row stays under it).
-            if (_panel != _AbovePanel.none)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: panelTop,
-                bottom: bottomChrome,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: themeBg,
-                    border: Border(
-                      top: BorderSide(
-                        color: chromeInk.withValues(alpha: .08),
-                        width: 0.5,
-                      ),
+            return Stack(
+              children: [
+                // Middle-band dismiss target (page stays visible around chrome).
+                if (widget.visible)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: band,
+                    bottom: chrome,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _handleDismiss,
+                      child: const ColoredBox(color: Color(0x00000000)),
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: CupertinoColors.black.withValues(alpha: .10),
-                        blurRadius: 12,
-                        offset: const Offset(0, -2),
-                      ),
-                    ],
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      // Grabber: tap or flick down closes the sheet only.
-                      GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTap: _closePanel,
-                        onVerticalDragEnd: (details) {
-                          if ((details.primaryVelocity ?? 0) > 280) {
-                            _closePanel();
-                          }
-                        },
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Center(
-                            child: Container(
-                              width: 36,
-                              height: 4,
-                              decoration: BoxDecoration(
-                                color: chromeInk.withValues(alpha: .22),
-                                borderRadius: BorderRadius.circular(2),
+
+                // Half-screen sheet above the action bar (seek row stays under it).
+                if (_panel != _AbovePanel.none)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    top: panelTop,
+                    bottom: chrome,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: themeBg,
+                        border: Border(
+                          top: BorderSide(
+                            color: chromeInk.withValues(alpha: .08),
+                            width: 0.5,
+                          ),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: CupertinoColors.black.withValues(alpha: .10),
+                            blurRadius: 12,
+                            offset: const Offset(0, -2),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          // Grabber: tap or flick down closes the sheet only.
+                          GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: _closePanel,
+                            onVerticalDragEnd: (details) {
+                              if ((details.primaryVelocity ?? 0) > 280) {
+                                _closePanel();
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              child: Center(
+                                child: Container(
+                                  width: 36,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: chromeInk.withValues(alpha: .22),
+                                    borderRadius: BorderRadius.circular(2),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                      ),
-                      Expanded(
-                        child: _panel == _AbovePanel.catalog
-                            ? _catalogPanel(context, themeBg)
-                            : _settingsPanel(context, themeBg),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            if (chromeVisible)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: ClipRect(
-                  child: SizeTransition(
-                    sizeFactor: _chromeAnim,
-                    alignment: Alignment.topCenter,
-                    child: SlideTransition(
-                      position: topSlide,
-                      child: ReaderTopBar(
-                        bookmarked: widget.bookmarked,
-                        title: widget.chapterTitle.isNotEmpty
-                            ? widget.chapterTitle
-                            : widget.bookTitle,
-                        surface: themeBg,
-                        onBack: _handleTopBarBack,
-                        onToggleBookmark: widget.onToggleBookmark,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-
-            if (chromeVisible)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: SlideTransition(
-                  position: bottomSlide,
-                  child: ColoredBox(
-                    color: themeBg,
-                    child: SafeArea(
-                      top: false,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _progressRow(context, themeBg),
-                          Container(
-                            height: 1,
-                            color: chromeInk.withValues(alpha: .08),
+                          Expanded(
+                            child: _panel == _AbovePanel.catalog
+                                ? _catalogPanel(context, themeBg)
+                                : _settingsPanel(context, themeBg),
                           ),
-                          _actionRow(context, themeBg),
                         ],
                       ),
                     ),
                   ),
-                ),
-              ),
-          ],
+
+                if (chromeVisible)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: ClipRect(
+                      child: SizeTransition(
+                        sizeFactor: _chromeAnim,
+                        alignment: Alignment.topCenter,
+                        child: SlideTransition(
+                          position: topSlide,
+                          child: ReaderTopBar(
+                            bookmarked: widget.bookmarked,
+                            title: widget.chapterTitle.isNotEmpty
+                                ? widget.chapterTitle
+                                : widget.bookTitle,
+                            surface: themeBg,
+                            onBack: _handleTopBarBack,
+                            onToggleBookmark: widget.onToggleBookmark,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                if (chromeVisible)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: SlideTransition(
+                      position: bottomSlide,
+                      child: ColoredBox(
+                        color: themeBg,
+                        child: SafeArea(
+                          top: false,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _progressRow(context, themeBg),
+                              Container(
+                                height: 1,
+                                color: chromeInk.withValues(alpha: .08),
+                              ),
+                              _actionRow(context, themeBg),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -574,6 +608,9 @@ class _ReaderMenuState extends State<ReaderMenu>
         chapters: widget.chapters,
         bookmarks: widget.bookmarks,
         notes: widget.notes,
+        paragraphs: widget.paragraphs,
+        pageLabelForParagraph: widget.pageLabelForParagraph,
+        onJumpToSearchHit: widget.onJumpToSearchHit,
         chapterPageLabels: widget.chapterPageLabels,
         currentParagraph: widget.currentParagraph,
         readingMode: widget.readingMode,

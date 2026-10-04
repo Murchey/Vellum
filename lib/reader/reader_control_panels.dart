@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Scrollbar;
 
+import '../services/book_search.dart';
 import '../services/library_models.dart';
 import '../services/notes_library.dart';
 import '../theme/vellum_theme.dart';
@@ -22,10 +25,48 @@ class ReaderDirectoryPanel extends StatefulWidget {
     required this.onRemoveBookmark,
     required this.onRemoveNote,
     required this.onClose,
+    this.onJumpToSearchHit,
+    this.paragraphs,
+    this.pageLabelForParagraph,
     this.bookTitle = '',
     this.surface,
     super.key,
   });
+
+  /// Height of the book-name line plus the tab row plus the query field.
+  ///
+  /// Part of the panel's contract: [ReaderMenu] keeps the sheet at least as tall
+  /// as [minPanelHeight], because a sheet shorter than its own header is exactly
+  /// what overflows — and the soft keyboard is what makes a sheet that short.
+  static double get headerHeight =>
+      _bookTitleHeight + _tabRowHeight + _searchRowHeight;
+
+  /// Header height the panel falls back to when the sheet is too short for the
+  /// book-name line: a compact app bar, one row of tabs, their rule, and a small
+  /// margin so sub-pixel rounding never turns into an overflow stripe.
+  static double get compactHeaderHeight =>
+      _compactBarHeight + _compactTabHeight + 0.5 + _compactSlack;
+
+  static const double _compactSlack = 4;
+
+  /// Height of the search summary bar (counts + step buttons).
+  static const double _searchSummaryHeight = 48;
+
+  /// Minimum room the tab's list needs to stay usable.
+  static const double _minBodyHeight = 40;
+
+  /// Smallest sheet the panel can render without overflowing.
+  ///
+  /// The search view is the tallest fixed content: the compact header plus the
+  /// summary bar, with a little list left underneath.
+  static double get minPanelHeight =>
+      compactHeaderHeight + _searchSummaryHeight + _minBodyHeight;
+
+  static const double _compactBarHeight = 46;
+  static const double _compactTabHeight = 34;
+  static const double _bookTitleHeight = 14 + 17 + 8;
+  static const double _tabRowHeight = 44;
+  static const double _searchRowHeight = 36 + 14;
 
   /// Fanqie reader catalog item height (`caloglayout/a.java` setItemHeight 54).
   static const double itemExtent = 54;
@@ -45,6 +86,18 @@ class ReaderDirectoryPanel extends StatefulWidget {
   final VoidCallback onClose;
   final String bookTitle;
 
+  /// Body text, enabling 全文搜索 in the catalogue tab. Null on panels that only
+  /// list the existing indexes.
+  final List<String>? paragraphs;
+
+  /// Tapping a search result: jumps to the paragraph **and** carries the query,
+  /// so the reader can mark the passage it was searching for.
+  final void Function(int paragraphIndex, String query)? onJumpToSearchHit;
+
+  /// Page label for a paragraph (e.g. `第 132 页`), shown on search results so a
+  /// hit can be placed in the book. Null when the reader has no page numbers.
+  final String Function(int paragraphIndex)? pageLabelForParagraph;
+
   /// Panel background (reading paper). Ink is derived from this so night
   /// paper stays readable even when the app theme is light.
   final Color? surface;
@@ -61,6 +114,49 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
   final _scrollController = ScrollController();
   var _didAutoScroll = false;
 
+  /// 全文搜索 state (catalogue tab only).
+  var _searching = false;
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _searchScrollController = ScrollController();
+  String _query = '';
+  SearchResults _results = SearchResults.empty;
+
+  /// Paragraph of the result row the reader is stepping through, so the list can
+  /// scroll to it and mark it.
+  int? _activeHit;
+
+  /// Full-book scanning is a single pass over every paragraph — fast on a normal
+  /// book, ~100 ms on a 二十四史-sized one — so typing waits for a short pause
+  /// instead of scanning per keystroke.
+  Timer? _searchDebounce;
+
+  /// Below this length the scan matches too much to be useful; CJK words are
+  /// short, so two characters is the useful floor.
+  static const int _minQueryLength = 2;
+  static const Duration _searchDebounceDelay = Duration(milliseconds: 180);
+
+  /// How long after the field takes focus a spontaneous loss still counts as the
+  /// keyboard failing to settle, rather than the reader dismissing it.
+  static const Duration _keyboardSettleWindow = Duration(seconds: 2);
+
+  /// Delay before recovering from such a loss, so it cannot turn into a fight
+  /// with a deliberate dismissal.
+  static const Duration _keyboardRefocusDelay = Duration(milliseconds: 250);
+  Timer? _focusLossTimer;
+  DateTime? _searchOpenedAt;
+
+  /// Estimated height of one result row, used to scroll a stepped-to hit into
+  /// view (rows vary by a line or two; this only needs to be close).
+  static const double _searchRowHeight = 96;
+
+  /// Stable identity for the query field, so the element that owns the text
+  /// input connection survives panel rebuilds (including a header layout swap
+  /// while the soft keyboard animates the viewport).
+  final _searchFieldKey = GlobalKey(debugLabel: 'reader-search-field');
+
+  bool get _canSearch => (widget.paragraphs?.isNotEmpty ?? false);
+
   static const double itemExtent = ReaderDirectoryPanel.itemExtent;
 
   List<MapEntry<int, String>> get _entries {
@@ -72,13 +168,156 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
   @override
   void initState() {
     super.initState();
+    _searchFocus.addListener(_onSearchFocusChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _autoScrollToCurrent());
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _focusLossTimer?.cancel();
+    _searchFocus.removeListener(_onSearchFocusChanged);
     _scrollController.dispose();
+    _searchScrollController.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
     super.dispose();
+  }
+
+  void _openSearch() {
+    setState(() {
+      _searching = true;
+      _query = '';
+      _results = SearchResults.empty;
+      _activeHit = null;
+    });
+    // The query field mounts on the next frame, where its own `autofocus` claims
+    // the caret and raises the keyboard. Asking the platform to show it from here
+    // as well opened a second input session for the same field: Android finished
+    // the first (`onFinishInputView`) and started another (`onStartInput`), which
+    // is what left the keyboard flickering or never settling.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _focusSearchField());
+  }
+
+  /// Refocuses the query field if it is on screen but has lost the caret
+  /// (after clearing it, or switching tabs).
+  ///
+  /// It deliberately does not ask the platform to show the keyboard: the field's
+  /// own `autofocus` already does that when it opens, and a second request opens
+  /// a second input session for the same field. Android then finishes the first
+  /// (`onFinishInputView`) and starts another (`onStartInput`) — the keyboard
+  /// flicker in the device log.
+  void _focusSearchField() {
+    if (!_searching) return;
+    final node = _searchFocus;
+    if (node.hasFocus) return;
+    if (!node.canRequestFocus) return;
+    node.requestFocus();
+  }
+
+  /// Watches for the keyboard being dropped shortly after it opens.
+  ///
+  /// The field keeps focus in every case we can reproduce, so a spontaneous loss
+  /// means the platform's input session went away. One delayed refocus recovers
+  /// from that without fighting the reader: dismissing the search (取消, the
+  /// sheet grabber, tapping away) clears `_searching` first, and a loss that
+  /// happens after the keyboard has settled is left alone.
+  void _onSearchFocusChanged() {
+    _focusLossTimer?.cancel();
+    if (_searchFocus.hasFocus) {
+      _searchOpenedAt = DateTime.now();
+      return;
+    }
+    if (!_searching) return;
+    final openedAt = _searchOpenedAt;
+    if (openedAt == null) return;
+    if (DateTime.now().difference(openedAt) > _keyboardSettleWindow) return;
+    _focusLossTimer = Timer(_keyboardRefocusDelay, () {
+      if (!mounted || !_searching || _searchFocus.hasFocus) return;
+      _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    _searchDebounce?.cancel();
+    _focusLossTimer?.cancel();
+    _searchController.clear();
+    setState(() {
+      _searching = false;
+      _query = '';
+      _results = SearchResults.empty;
+      _activeHit = null;
+    });
+  }
+
+  /// Restarts the debounce window; [_runSearch] does the actual scan.
+  void _onQueryChanged(String value) {
+    _searchDebounce?.cancel();
+    final query = value.trim();
+    // Clearing or falling below the floor shows the prompt immediately.
+    if (query.length < _minQueryLength) {
+      _runSearch(value);
+      return;
+    }
+    _searchDebounce = Timer(_searchDebounceDelay, () {
+      if (mounted) _runSearch(value);
+    });
+  }
+
+  void _runSearch(String value) {
+    _searchDebounce?.cancel();
+    final query = value.trim();
+    setState(() {
+      _query = query;
+      _results = query.length < _minQueryLength
+          ? SearchResults.empty
+          : searchBook(
+              paragraphs: widget.paragraphs!,
+              query: query,
+              chapters: widget.chapters,
+            );
+      // A new scan starts from the top of the list.
+      _activeHit = _results.isEmpty ? null : _results.hits.first.paragraphIndex;
+    });
+    if (_searchScrollController.hasClients) {
+      _searchScrollController.jumpTo(0);
+    }
+  }
+
+  /// Moves to the next/previous result, as one flat sequence over the grouped
+  /// list, and scrolls it into view.
+  void _stepHit(int delta) {
+    final hits = _results.hits;
+    if (hits.isEmpty) return;
+    final current = hits.indexWhere((hit) => hit.paragraphIndex == _activeHit);
+    final next = current < 0
+        ? (delta >= 0 ? 0 : hits.length - 1)
+        : (current + delta).clamp(0, hits.length - 1);
+    setState(() => _activeHit = hits[next].paragraphIndex);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scrollSearchTo(hits[next].paragraphIndex);
+    });
+  }
+
+  void _scrollSearchTo(int paragraphIndex) {
+    if (!_searchScrollController.hasClients) return;
+    final groups = groupHitsByChapter(_results.hits);
+    var row = 0;
+    for (final group in groups) {
+      row++; // chapter header
+      for (final hit in group.hits) {
+        if (hit.paragraphIndex == paragraphIndex) {
+          final max = _searchScrollController.position.maxScrollExtent;
+          _searchScrollController.animateTo(
+            (row * _searchRowHeight).clamp(0.0, max),
+            duration: const Duration(milliseconds: 160),
+            curve: Curves.easeOutCubic,
+          );
+          return;
+        }
+        row++;
+      }
+    }
   }
 
   void _toggleOrder() {
@@ -182,6 +421,288 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
       _ => '选中正文后可以划线或写笔记。',
     };
 
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // The sheet is a fixed slot between the reader's top bar and the bottom
+        // chrome, and the soft keyboard shrinks the viewport without shrinking
+        // that slot. Below [headerHeight] the book-name line and the query field
+        // no longer fit, so the panel drops to a compact header instead of
+        // painting the black/yellow overflow stripes.
+        if (constraints.maxHeight < headerHeight) {
+          return _compactLayout(
+            context,
+            entries: entries,
+            emptyMessage: emptyMessage,
+            ink: ink,
+            muted: muted,
+            accent: accent,
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _header(context, ink: ink, muted: muted, accent: accent),
+            Expanded(
+              child: _body(
+                context,
+                entries: entries,
+                emptyMessage: emptyMessage,
+                ink: ink,
+                muted: muted,
+                accent: accent,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Header + one row of tabs, for a sheet too short for the full header.
+  ///
+  /// Everything the reader needs to get out of the squeezed state survives: the
+  /// close button, the tab switch, and the search field when it is open.
+  Widget _compactLayout(
+    BuildContext context, {
+    required List<MapEntry<int, String>> entries,
+    required String emptyMessage,
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(
+          height: ReaderDirectoryPanel._compactBarHeight,
+          child: Row(
+            children: [
+              if (_searching)
+                CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(48, 36),
+                  onPressed: _closeSearch,
+                  child: Text('取消', style: TextStyle(color: accent)),
+                )
+              else ...[
+                const SizedBox(width: 8),
+                CupertinoButton(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(40, 36),
+                  onPressed: widget.onClose,
+                  child: Icon(CupertinoIcons.clear, size: 19, color: muted),
+                ),
+                const SizedBox(width: 4),
+              ],
+              Expanded(
+                child: _searching
+                    ? _searchField(
+                        context,
+                        ink: ink,
+                        muted: muted,
+                        accent: accent,
+                      )
+                    : Text(
+                        widget.bookTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: ink.withValues(alpha: .55),
+                          fontSize: 13,
+                        ),
+                      ),
+              ),
+              if (!_searching && _canSearch)
+                CupertinoButton(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  minimumSize: const Size(40, 36),
+                  onPressed: _openSearch,
+                  child: Icon(CupertinoIcons.search, size: 18, color: accent),
+                ),
+              const SizedBox(width: 4),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: ReaderDirectoryPanel._compactTabHeight,
+          child: _tabRow(
+            context,
+            ink: ink,
+            muted: muted,
+            accent: accent,
+            withTrailingControls: false,
+          ),
+        ),
+        Container(height: 0.5, color: ink.withValues(alpha: .08)),
+        Expanded(
+          child: _body(
+            context,
+            entries: entries,
+            emptyMessage: emptyMessage,
+            ink: ink,
+            muted: muted,
+            accent: accent,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Height of the book-name line plus the tab row.
+  ///
+  /// Part of the panel's contract: [ReaderMenu] keeps the sheet at least this
+  /// tall, because a sheet shorter than its own header is what overflows.
+  static double get headerHeight =>
+      _bookTitleHeight + _tabRowHeight + _searchFieldHeight;
+
+  static const double _bookTitleHeight = 14 + 17 + 8;
+  static const double _tabRowHeight = 44;
+
+  /// Height of the query field row (field + its padding).
+  static const double _searchFieldHeight = 36 + 14;
+
+  /// Tabs, the search entry point, the order toggle and the close button.
+  /// Shared by the full and the compact header; the compact bar already carries
+  /// the trailing controls, so [withTrailingControls] turns them off there.
+  ///
+  /// The tabs are laid out with [Expanded] and [Wrap] rather than a fixed
+  /// `Spacer` row: at a large system font scale the three labels plus the three
+  /// controls are wider than a phone, and a fixed row simply overflowed.
+  Widget _tabRow(
+    BuildContext context, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+    bool withTrailingControls = true,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        children: [
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (final (index, label) in [
+                    (0, '目录'),
+                    (1, '书签'),
+                    (2, '笔记'),
+                  ])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 24),
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          setState(() => _tab = index);
+                          _didAutoScroll = false;
+                          WidgetsBinding.instance.addPostFrameCallback(
+                            (_) => _autoScrollToCurrent(),
+                          );
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Text(
+                            label,
+                            style: TextStyle(
+                              color: _tab == index ? accent : muted,
+                              fontSize: 16,
+                              fontWeight: _tab == index
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (withTrailingControls) ...[
+            // 全文搜索 lives in the catalogue tab, where a reader looks for a
+            // passage they half remember. Fanqie's catalog order toggle shares
+            // the slot and hides while searching.
+            if (_tab == 0 && _canSearch && !_searching)
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(44, 44),
+                onPressed: _openSearch,
+                child: Icon(CupertinoIcons.search, size: 19, color: accent),
+              ),
+            if (_tab == 0 && !_searching)
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                minimumSize: const Size(52, 44),
+                onPressed: _toggleOrder,
+                child: Text(
+                  _descending ? '倒序' : '正序',
+                  style: TextStyle(color: accent, fontSize: 13),
+                ),
+              ),
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              minimumSize: const Size(44, 44),
+              onPressed: widget.onClose,
+              child: Icon(CupertinoIcons.clear, size: 20, color: muted),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// The query field plus its 取消 button.
+  Widget _searchField(
+    BuildContext context, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: ink.withValues(alpha: .06),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(CupertinoIcons.search, size: 16, color: muted),
+          const SizedBox(width: 6),
+          Expanded(
+            // Its own element, so a panel rebuild cannot recreate the input
+            // connection — which on Android tears the session down
+            // (`onFinishInputView`) and starts another (`onStartInput`). The key
+            // keeps that element alive even if the surrounding header layout
+            // (full vs compact) swaps while the keyboard animates the viewport.
+            child: _SearchQueryField(
+              key: _searchFieldKey,
+              controller: _searchController,
+              focusNode: _searchFocus,
+              onChanged: _onQueryChanged,
+              showClear: _query.isNotEmpty,
+              onClear: () {
+                _searchController.clear();
+                _runSearch('');
+              },
+              style: TextStyle(color: ink, fontSize: 14),
+              placeholderStyle: TextStyle(color: muted, fontSize: 14),
+              cursorColor: accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _header(
+    BuildContext context, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -198,178 +719,472 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
           ),
 
         // 2) SlidingTabLayout-style tabs (Fanqie 16sp)
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Row(
-            children: [
-              for (final (index, label) in [(0, '目录'), (1, '书签'), (2, '笔记')])
-                Padding(
-                  padding: const EdgeInsets.only(right: 24),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      setState(() => _tab = index);
-                      _didAutoScroll = false;
-                      WidgetsBinding.instance.addPostFrameCallback(
-                        (_) => _autoScrollToCurrent(),
-                      );
-                    },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Text(
-                        label,
+        _tabRow(context, ink: ink, muted: muted, accent: accent),
+
+        // 2b) 全文搜索 field, replacing the tab row content while active.
+        if (_searching)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _searchField(
+                    context,
+                    ink: ink,
+                    muted: muted,
+                    accent: accent,
+                  ),
+                ),
+                CupertinoButton(
+                  padding: const EdgeInsets.only(left: 10),
+                  minimumSize: const Size(0, 36),
+                  onPressed: _closeSearch,
+                  child: Text('取消', style: TextStyle(color: accent)),
+                ),
+              ],
+            ),
+          ),
+
+        // 3) Divider (Fanqie alj / item: 0.5dp)
+        Container(height: 0.5, color: ink.withValues(alpha: .08)),
+      ],
+    );
+  }
+
+  /// The tab's list: search results, notes, or the index itself.
+  Widget _body(
+    BuildContext context, {
+    required List<MapEntry<int, String>> entries,
+    required String emptyMessage,
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    if (_searching) {
+      return _buildSearchResults(
+        context,
+        ink: ink,
+        muted: muted,
+        accent: accent,
+      );
+    }
+    if (_tab == 2) return _buildNotes(context);
+    if (entries.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Text(
+            emptyMessage,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, fontSize: 14),
+          ),
+        ),
+      );
+    }
+    return ListView.builder(
+      controller: _scrollController,
+      padding: EdgeInsets.zero,
+      itemCount: entries.length,
+      itemExtent: itemExtent,
+      itemBuilder: (context, index) {
+        final entry = entries[index];
+        final isCurrent =
+            _tab == 0 && _isCurrentChapter(entry.key, index, entries);
+        // Fanqie wl5/e.M3: read = body @ 60% (`yz4.j.y(..., 0.6f)`).
+        final isRead = _tab == 0 && _isReadChapter(entry.key);
+        final titleColor = isCurrent
+            ? accent
+            : isRead
+            ? ink.withValues(alpha: .6)
+            : ink;
+        // Fanqie S3/P3: secondary always at 60% body.
+        final metaColor = ink.withValues(alpha: .45);
+        final secondary = _secondaryLabel(entry.key, isCurrent, isRead);
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () => widget.onJumpToParagraph(entry.key),
+          child: Container(
+            // Fanqie reader catalog item: 54dp, padH 20dp
+            // (caloglayout/a.java setItemHeight 54; avr 72 is audio).
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            decoration: BoxDecoration(
+              border: Border(
+                bottom: BorderSide(
+                  color: ink.withValues(alpha: .06),
+                  width: 0.5,
+                ),
+              ),
+            ),
+            child: Row(
+              children: [
+                if (isCurrent)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Icon(
+                      CupertinoIcons.bookmark_fill,
+                      size: 14,
+                      color: accent,
+                    ),
+                  ),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        entry.value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: _tab == index ? accent : muted,
-                          fontSize: 16,
-                          fontWeight: _tab == index
+                          color: titleColor,
+                          fontSize: 15,
+                          fontWeight: isCurrent
                               ? FontWeight.w600
                               : FontWeight.w400,
                         ),
                       ),
-                    ),
+                      if (secondary.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          secondary,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: metaColor, fontSize: 12),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              const Spacer(),
-              // Fanqie catalog order toggle.
-              if (_tab == 0)
-                CupertinoButton(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(52, 44),
-                  onPressed: _toggleOrder,
-                  child: Text(
-                    _descending ? '倒序' : '正序',
-                    style: TextStyle(color: accent, fontSize: 13),
+                if (_tab == 1)
+                  CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(32, 32),
+                    onPressed: () async {
+                      await widget.onRemoveBookmark(entry.key);
+                      if (mounted) setState(() {});
+                    },
+                    child: Icon(CupertinoIcons.delete, size: 17, color: muted),
                   ),
-                ),
-              CupertinoButton(
-                padding: EdgeInsets.zero,
-                minimumSize: const Size(44, 44),
-                onPressed: widget.onClose,
-                child: Icon(CupertinoIcons.clear, size: 20, color: muted),
-              ),
-            ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// Search results, grouped by chapter.
+  ///
+  /// A flat list of "第 N 段" is hard to navigate in a long book, so results are
+  /// grouped under chapter headers; each row leads with the passage (query
+  /// highlighted) and follows with the line before it for context, plus the page
+  /// the hit sits on. A summary bar counts them and steps through them.
+  Widget _buildSearchResults(
+    BuildContext context, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    final hits = _results.hits;
+    if (hits.isEmpty) {
+      final message = _query.isEmpty
+          ? '输入至少 $_minQueryLength 个字开始搜索'
+          : _query.length < _minQueryLength
+          ? '再输入 ${_minQueryLength - _query.length} 个字'
+          : '没有找到「$_query」';
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: muted, fontSize: 14),
           ),
         ),
+      );
+    }
 
-        // 3) Divider (Fanqie alj / item: 0.5dp)
-        Container(height: 0.5, color: ink.withValues(alpha: .08)),
+    final groups = groupHitsByChapter(hits);
+    final activeIndex = hits.indexWhere(
+      (hit) => hit.paragraphIndex == _activeHit,
+    );
+    final summary = _searchSummary(
+      context,
+      ink: ink,
+      muted: muted,
+      accent: accent,
+      activeIndex: activeIndex,
+    );
+    final list = ListView.builder(
+      controller: _searchScrollController,
+      padding: const EdgeInsets.only(bottom: 8),
+      itemCount: hits.length + groups.length,
+      itemBuilder: (context, row) => _searchRow(
+        context,
+        row,
+        groups: groups,
+        ink: ink,
+        muted: muted,
+        accent: accent,
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          summary,
+          Expanded(
+            // Showing the bar permanently makes it paint every frame, and it
+            // asserts when its list has no position yet (an empty or squeezed
+            // result view). It shows while scrolling instead.
+            child: constraints.maxHeight < _searchListRoom
+                ? list
+                : Scrollbar(child: list),
+          ),
+        ],
+      ),
+    );
+  }
 
-        // 4) List — fills remaining height provided by parent
-        Expanded(
-          child: _tab == 2
-              ? _buildNotes(context)
-              : entries.isEmpty
-              ? Center(
-                  child: Text(
-                    emptyMessage,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: muted, fontSize: 14),
-                  ),
-                )
-              : ListView.builder(
-                  controller: _scrollController,
-                  padding: EdgeInsets.zero,
-                  itemCount: entries.length,
-                  itemExtent: itemExtent,
-                  itemBuilder: (context, index) {
-                    final entry = entries[index];
-                    final isCurrent =
-                        _tab == 0 &&
-                        _isCurrentChapter(entry.key, index, entries);
-                    // Fanqie wl5/e.M3: read = body @ 60% (`yz4.j.y(..., 0.6f)`).
-                    final isRead = _tab == 0 && _isReadChapter(entry.key);
-                    final titleColor = isCurrent
-                        ? accent
-                        : isRead
-                        ? ink.withValues(alpha: .6)
-                        : ink;
-                    // Fanqie S3/P3: secondary always at 60% body.
-                    final metaColor = ink.withValues(alpha: .45);
-                    final secondary = _secondaryLabel(
-                      entry.key,
-                      isCurrent,
-                      isRead,
-                    );
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: () => widget.onJumpToParagraph(entry.key),
-                      child: Container(
-                        // Fanqie reader catalog item: 54dp, padH 20dp
-                        // (caloglayout/a.java setItemHeight 54; avr 72 is audio).
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(
-                              color: ink.withValues(alpha: .06),
-                              width: 0.5,
-                            ),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            if (isCurrent)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 8),
-                                child: Icon(
-                                  CupertinoIcons.bookmark_fill,
-                                  size: 14,
-                                  color: accent,
-                                ),
-                              ),
-                            Expanded(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    entry.value,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: titleColor,
-                                      fontSize: 15,
-                                      fontWeight: isCurrent
-                                          ? FontWeight.w600
-                                          : FontWeight.w400,
-                                    ),
-                                  ),
-                                  if (secondary.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      secondary,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: metaColor,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ),
-                            if (_tab == 1)
-                              CupertinoButton(
-                                padding: EdgeInsets.zero,
-                                minimumSize: const Size(32, 32),
-                                onPressed: () async {
-                                  await widget.onRemoveBookmark(entry.key);
-                                  if (mounted) setState(() {});
-                                },
-                                child: Icon(
-                                  CupertinoIcons.delete,
-                                  size: 17,
-                                  color: muted,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
+  /// Room the results list needs before its scrollbar is worth painting.
+  static const double _searchListRoom = 96;
+
+  /// Counts, the "showing the first N" caveat, and the step-through buttons.
+  Widget _searchSummary(
+    BuildContext context, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+    required int activeIndex,
+  }) {
+    final hits = _results.hits;
+    final position = activeIndex < 0 ? 1 : activeIndex + 1;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 6, 12, 6),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: ink.withValues(alpha: .06), width: 0.5),
         ),
-      ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${_results.paragraphCount} 段 · ${_results.totalOccurrences} 处'
+              '${_results.truncated ? '（仅显示前面这些）' : ''}',
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+          ),
+          Text(
+            '$position/${hits.length}',
+            style: TextStyle(color: muted, fontSize: 12),
+          ),
+          CupertinoButton(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            minimumSize: const Size(36, 32),
+            onPressed: activeIndex <= 0 ? null : () => _stepHit(-1),
+            child: Icon(
+              CupertinoIcons.chevron_up,
+              size: 16,
+              color: activeIndex <= 0 ? muted.withValues(alpha: .4) : accent,
+            ),
+          ),
+          CupertinoButton(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            minimumSize: const Size(36, 32),
+            onPressed: activeIndex >= hits.length - 1
+                ? null
+                : () => _stepHit(1),
+            child: Icon(
+              CupertinoIcons.chevron_down,
+              size: 16,
+              color: activeIndex >= hits.length - 1
+                  ? muted.withValues(alpha: .4)
+                  : accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One row of the grouped results: either a chapter header or a hit.
+  Widget _searchRow(
+    BuildContext context,
+    int row, {
+    required List<SearchGroup> groups,
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    var remaining = row;
+    for (final group in groups) {
+      if (remaining == 0) {
+        return _chapterHeaderRow(group, ink: ink, muted: muted, accent: accent);
+      }
+      remaining--;
+      if (remaining < group.hits.length) {
+        final hit = group.hits[remaining];
+        return _hitRow(hit, ink: ink, muted: muted, accent: accent);
+      }
+      remaining -= group.hits.length;
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _chapterHeaderRow(
+    SearchGroup group, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    final title = group.title.isEmpty ? '未分章' : group.title;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
+      color: ink.withValues(alpha: .03),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: accent,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          Text(
+            '${group.occurrences} 处',
+            style: TextStyle(color: muted, fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _hitRow(
+    SearchHit hit, {
+    required Color ink,
+    required Color muted,
+    required Color accent,
+  }) {
+    final active = hit.paragraphIndex == _activeHit;
+    final page = widget.pageLabelForParagraph?.call(hit.paragraphIndex) ?? '';
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final query = _query;
+        _closeSearch();
+        final jump = widget.onJumpToSearchHit;
+        if (jump != null) {
+          jump(hit.paragraphIndex, query);
+        } else {
+          widget.onJumpToParagraph(hit.paragraphIndex);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+        decoration: BoxDecoration(
+          color: active ? accent.withValues(alpha: .07) : null,
+          border: Border(
+            bottom: BorderSide(color: ink.withValues(alpha: .06), width: 0.5),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Context line above the match: tells the reader what leads into it.
+            if (hit.first.leadingContext.isNotEmpty)
+              Text(
+                hit.first.leadingContext,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: ink.withValues(alpha: .35),
+                  fontSize: 12,
+                ),
+              ),
+            const SizedBox(height: 2),
+            _matchText(hit.first, ink: ink, accent: accent),
+            if (hit.first.trailingContext.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                hit.first.trailingContext,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: ink.withValues(alpha: .35),
+                  fontSize: 12,
+                ),
+              ),
+            ],
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Text(
+                  '第 ${hit.paragraphIndex + 1} 段'
+                  '${hit.first.lineNumber > 1 ? ' · 第 ${hit.first.lineNumber} 行' : ''}',
+                  style: TextStyle(color: muted, fontSize: 11),
+                ),
+                if (page.isNotEmpty) ...[
+                  Text(
+                    ' · $page',
+                    style: TextStyle(color: muted, fontSize: 11),
+                  ),
+                ],
+                const Spacer(),
+                if (hit.matchCount > 1)
+                  Text(
+                    '本段 ${hit.matchCount} 处',
+                    style: TextStyle(
+                      color: accent.withValues(alpha: .8),
+                      fontSize: 11,
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Snippet with the query picked out, so a hit is recognisable at a glance.
+  Widget _matchText(
+    SearchMatch match, {
+    required Color ink,
+    required Color accent,
+  }) {
+    final text = match.snippet;
+    final start = match.matchStart.clamp(0, text.length);
+    final end = match.matchEnd.clamp(start, text.length);
+    final base = TextStyle(
+      color: ink.withValues(alpha: .92),
+      fontSize: 14,
+      height: 1.35,
+    );
+    return Text.rich(
+      TextSpan(
+        style: base,
+        children: [
+          if (start > 0) TextSpan(text: text.substring(0, start)),
+          if (end > start)
+            TextSpan(
+              text: text.substring(start, end),
+              style: base.copyWith(
+                color: accent,
+                fontWeight: FontWeight.w600,
+                backgroundColor: accent.withValues(alpha: .18),
+              ),
+            ),
+          if (end < text.length) TextSpan(text: text.substring(end)),
+        ],
+      ),
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
     );
   }
 
@@ -394,11 +1209,14 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
         itemCount: notes.length,
         itemBuilder: (context, index) {
           final note = notes[index];
+          // Imported notes whose book was never identified are tagged, and this
+          // list is where the reader meets them for the current book.
+          final orphaned = note.bookId == unmatchedBookId;
           return CupertinoListTile(
             backgroundColor: surface,
             backgroundColorActivated: ink.withValues(alpha: .08),
             title: Text(
-              note.selectedText,
+              note.selectedText.isEmpty ? note.note : note.selectedText,
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -408,17 +1226,18 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
                 ).withValues(alpha: .18),
               ),
             ),
-            subtitle: note.note.trim().isEmpty
-                ? Text(
-                    '${note.kind.label} · 第 ${note.paragraphIndex + 1} 段',
-                    style: TextStyle(color: muted),
-                  )
-                : Text(
-                    note.note.trim(),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: muted),
-                  ),
+            subtitle: Text(
+              [
+                note.note.trim().isEmpty || note.selectedText.isEmpty
+                    ? note.kind.label
+                    : note.note.trim(),
+                '第 ${note.paragraphIndex + 1} 段',
+                if (orphaned) '$unmatchedBookTitle · 可重新关联',
+              ].join(' · '),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: muted),
+            ),
             trailing: CupertinoButton(
               padding: EdgeInsets.zero,
               minimumSize: const Size(44, 44),
@@ -432,6 +1251,71 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
           );
         },
       ),
+    );
+  }
+}
+
+/// The reader's search query field.
+///
+/// It exists only while searching, so `autofocus` is what claims the caret and
+/// raises the soft keyboard: a focus request made from the panel lands before
+/// this field is mounted and is dropped. It is a separate widget so panel
+/// rebuilds cannot recreate its input connection.
+class _SearchQueryField extends StatefulWidget {
+  const _SearchQueryField({
+    required this.controller,
+    required this.focusNode,
+    required this.onChanged,
+    required this.showClear,
+    required this.onClear,
+    required this.style,
+    required this.placeholderStyle,
+    required this.cursorColor,
+    super.key,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final ValueChanged<String> onChanged;
+  final bool showClear;
+  final VoidCallback onClear;
+  final TextStyle style;
+  final TextStyle placeholderStyle;
+  final Color cursorColor;
+
+  @override
+  State<_SearchQueryField> createState() => _SearchQueryFieldState();
+}
+
+class _SearchQueryFieldState extends State<_SearchQueryField> {
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: CupertinoTextField(
+            controller: widget.controller,
+            focusNode: widget.focusNode,
+            autofocus: true,
+            onChanged: widget.onChanged,
+            placeholder: '搜索全书内容',
+            placeholderStyle: widget.placeholderStyle,
+            style: widget.style,
+            padding: EdgeInsets.zero,
+            decoration: const BoxDecoration(),
+            cursorColor: widget.cursorColor,
+          ),
+        ),
+        if (widget.showClear)
+          GestureDetector(
+            onTap: widget.onClear,
+            child: Icon(
+              CupertinoIcons.xmark_circle_fill,
+              size: 16,
+              color: widget.placeholderStyle.color,
+            ),
+          ),
+      ],
     );
   }
 }
@@ -533,7 +1417,6 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     );
   }
 
-
   static const _presetPapers = <Color>[
     VellumTheme.readerWhite,
     VellumTheme.readerSepia,
@@ -587,11 +1470,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  CupertinoIcons.photo_on_rectangle,
-                  size: 16,
-                  color: _ink,
-                ),
+                Icon(CupertinoIcons.photo_on_rectangle, size: 16, color: _ink),
                 const SizedBox(width: 4),
                 Text('导入图片', style: TextStyle(fontSize: 13, color: _ink)),
               ],
@@ -603,7 +1482,10 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 10),
             minimumSize: const Size(0, 34),
             onPressed: () => widget.onBackground(
-              widget.background.copyWith(clearImage: true, kind: BackgroundKind.solid),
+              widget.background.copyWith(
+                clearImage: true,
+                kind: BackgroundKind.solid,
+              ),
             ),
             child: Text('移除', style: TextStyle(fontSize: 13, color: _muted)),
           ),
@@ -619,7 +1501,8 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
             height: 28,
             decoration: BoxDecoration(
               color: Color(
-                widget.background.colorValue ?? VellumTheme.readerWhite.toARGB32(),
+                widget.background.colorValue ??
+                    VellumTheme.readerWhite.toARGB32(),
               ),
               shape: BoxShape.circle,
               border: Border.all(color: _ink.withValues(alpha: .25)),
@@ -645,7 +1528,10 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
               onPressed: () => widget.onBackground(
                 widget.background.copyWith(clearColor: true),
               ),
-              child: Text('恢复默认', style: TextStyle(fontSize: 12, color: _muted)),
+              child: Text(
+                '恢复默认',
+                style: TextStyle(fontSize: 12, color: _muted),
+              ),
             ),
         ],
       ),
@@ -716,9 +1602,8 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           CupertinoButton(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             minimumSize: const Size(0, 34),
-            onPressed: () => widget.onBackground(
-              widget.background.copyWith(clearInk: true),
-            ),
+            onPressed: () =>
+                widget.onBackground(widget.background.copyWith(clearInk: true)),
             child: Text('恢复默认', style: TextStyle(fontSize: 12, color: _muted)),
           ),
       ],
@@ -757,7 +1642,8 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
                 entry.value,
                 style: TextStyle(
                   fontSize: 12,
-                  color: ReaderBackground.suggestTone(entry.key) ==
+                  color:
+                      ReaderBackground.suggestTone(entry.key) ==
                           BackgroundTone.dark
                       ? CupertinoColors.white
                       : CupertinoColors.black,
@@ -973,11 +1859,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('自定义', style: TextStyle(fontSize: 13, color: _ink)),
-                Icon(
-                  CupertinoIcons.chevron_forward,
-                  size: 14,
-                  color: _muted,
-                ),
+                Icon(CupertinoIcons.chevron_forward, size: 14, color: _muted),
               ],
             ),
           ),

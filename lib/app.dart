@@ -24,6 +24,7 @@ import 'services/book_import_service.dart' show BookImportService;
 
 import 'services/book_library.dart';
 import 'services/font_registry.dart';
+import 'services/notes_import.dart';
 import 'services/reading_stats.dart';
 
 import 'theme/vellum_theme.dart';
@@ -732,6 +733,8 @@ class _LibraryShellState extends State<LibraryShell> {
               onFontUsageChanged: widget.onFontUsageChanged,
 
               storageUsage: _library.storageUsage,
+
+              availableBooks: exportableBooks(_books),
 
               onClearBooks: () async {
                 await _library.clearBooks();

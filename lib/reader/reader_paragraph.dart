@@ -28,6 +28,8 @@ class ReaderParagraph extends StatelessWidget {
     this.onJumpToParagraph,
     this.highlights = const [],
     this.highlightColor,
+    this.searchHighlight = '',
+    this.searchHighlightColor,
     this.isChapterHeading,
     this.noteCount = 0,
     this.onOpenNotes,
@@ -56,6 +58,15 @@ class ReaderParagraph extends StatelessWidget {
 
   /// Background painted behind [highlights]; defaults to the theme accent.
   final Color? highlightColor;
+
+  /// Query the reader searched for, marked wherever it appears in this
+  /// paragraph. Passing the term down is what puts the highlight on the target
+  /// paragraph after a search result is tapped.
+  final String searchHighlight;
+
+  /// Background for [searchHighlight]; a different tint from note highlights so
+  /// "where I searched" and "what I marked" stay distinguishable.
+  final Color? searchHighlightColor;
 
   /// Whether a table-of-contents entry starts here. Callers that know it should
   /// pass it: the fallback scans every entry, which is O(entries) per build.
@@ -158,6 +169,10 @@ class ReaderParagraph extends StatelessWidget {
         highlightColor:
             highlightColor ??
             VellumTheme.readerAccentOf(context).withValues(alpha: .22),
+        searchHighlight: searchHighlight,
+        searchHighlightColor:
+            searchHighlightColor ??
+            VellumTheme.readerAccentOf(context).withValues(alpha: .34),
       ),
     ];
     final alignment = effectiveHeading != null
@@ -256,6 +271,8 @@ class ReaderParagraph extends StatelessWidget {
     Uint8List? image,
     List<String> highlights = const [],
     Color highlightColor = const Color(0x33a33d2e),
+    String searchHighlight = '',
+    Color searchHighlightColor = const Color(0x55a33d2e),
   }) {
     final spans = <InlineSpan>[];
     final buffer = StringBuffer();
@@ -361,8 +378,17 @@ class ReaderParagraph extends StatelessWidget {
     }
 
     if (spans.isEmpty) spans.add(TextSpan(text: source));
-    if (highlights.isEmpty) return spans;
-    return _highlightSpans(spans, highlights, highlightColor);
+    var result = spans;
+    if (highlights.isNotEmpty) {
+      result = _highlightSpans(result, highlights, highlightColor);
+    }
+    // The search term goes on last so it stays visible inside a passage that is
+    // already marked as a note.
+    final query = searchHighlight.trim();
+    if (query.isNotEmpty) {
+      result = _highlightSpans(result, [query], searchHighlightColor);
+    }
+    return result;
   }
 
   /// Splits plain text spans so every occurrence of a highlighted passage gets

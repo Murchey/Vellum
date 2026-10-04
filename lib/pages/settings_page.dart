@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,12 +8,15 @@ import 'package:flutter/cupertino.dart';
 import '../services/book_library.dart';
 
 import '../services/notes_library.dart';
+import '../services/notes_import.dart';
 import '../services/reading_stats.dart';
 import '../services/vellum_update_service.dart';
 
 import '../theme/vellum_theme.dart';
 
 import 'font_manager_sheet.dart';
+import 'notes_import_sheet.dart';
+import 'unassociated_notes_sheet.dart';
 
 import 'ebook_to_txt_page.dart';
 import 'reading_stats_page.dart';
@@ -54,6 +57,9 @@ class SettingsPage extends StatefulWidget {
 
   final Future<void> Function() onClearReadingStates;
 
+  /// Shelf titles, for tying imported notes to a book by hand.
+  final List<BookMatchCandidate> availableBooks;
+
   const SettingsPage({
     required this.onCycleTheme,
     required this.themeModeLabel,
@@ -82,6 +88,8 @@ class SettingsPage extends StatefulWidget {
 
     required this.onClearReadingStates,
 
+    this.availableBooks = const [],
+
     super.key,
   });
 
@@ -105,6 +113,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadUpdateRepo();
     _loadUpdatePreferences();
     _loadReadingStats();
+    _loadOrphanCount();
   }
 
   Future<void> _loadUpdatePreferences() async {
@@ -161,6 +170,115 @@ class _SettingsPageState extends State<SettingsPage> {
       if (mounted) await _showUpdateDialog('导出笔记失败：$error');
     }
   }
+
+  /// Notes waiting for a book, surfaced so the import fallback is reachable
+  /// later instead of hiding in the file system.
+  int _orphanCount = 0;
+
+  Future<void> _loadOrphanCount() async {
+    final notes = await const NotesLibrary().load();
+    if (!mounted) return;
+    setState(() {
+      _orphanCount = notes
+          .where((note) => note.bookId == unmatchedBookId)
+          .length;
+    });
+  }
+
+  Future<void> _openUnassociatedNotes() async {
+    await showUnassociatedNotesSheet(
+      context,
+      books: widget.availableBooks,
+      onChanged: _loadOrphanCount,
+    );
+    await _loadOrphanCount();
+  }
+
+  /// Reads a notes file, decides which book it belongs to, and lets the reader
+  /// confirm or change that before anything is written.
+  Future<void> _importNotes() async {
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        dialogTitle: '导入阅读笔记',
+        type: FileType.custom,
+        allowedExtensions: const ['json', 'txt', 'md', 'markdown'],
+        withData: true,
+      );
+      final file = picked?.files.single;
+      if (file == null || !mounted) return;
+
+      var content = file.bytes == null
+          ? ''
+          : utf8.decode(file.bytes!, allowMalformed: true);
+      if (content.isEmpty && file.path != null) {
+        final onDisk = File(file.path!);
+        if (await onDisk.exists()) {
+          content = await onDisk.readAsString();
+        }
+      }
+      if (!mounted) return;
+      if (content.trim().isEmpty) {
+        await _showUpdateDialog('这个文件是空的，或者无法读取。');
+        return;
+      }
+
+      final import = parseNotesFile(content: content, fileName: file.name);
+      if (import.isEmpty) {
+        await _showUpdateDialog(
+          import.warning.isEmpty ? '没有在文件里找到笔记。' : import.warning,
+        );
+        return;
+      }
+
+      final books = widget.availableBooks;
+      final match = matchBooksForImport(
+        books: books,
+        import: import,
+        fileName: file.name,
+      );
+      if (!mounted) return;
+
+      final outcome = await showCupertinoModalPopup<NotesImportOutcome>(
+        context: context,
+        builder: (_) => NotesImportSheet(
+          import: import,
+          books: books,
+          match: match,
+          fileName: file.name,
+        ),
+      );
+      if (outcome == null || !mounted) return;
+
+      final saved = await saveImportedNotes(
+        library: const NotesLibrary(),
+        notes: import.notes,
+        book: outcome.unassociated ? null : outcome.book,
+      );
+      if (!mounted) return;
+      await _showUpdateDialog(
+        '已导入 $saved 条笔记'
+        '${outcome.unassociated ? '（未关联，可稍后再关联书籍）' : '到《${outcome.book!.title}》'}。',
+      );
+    } catch (error) {
+      if (mounted) await _showUpdateDialog('导入笔记失败：$error');
+    }
+  }
+
+  /// Constrains a tile's trailing info so it cannot push the row past the tile.
+  ///
+  /// `CupertinoListTile` lays `additionalInfo` out at its intrinsic width next to
+  /// the title, so a long value (「今日 0 秒 · 累计 0 秒」, 「JSON / 文本」) makes the
+  /// row wider than the tile on a narrow phone — a horizontal overflow stripe.
+  Widget _info(BuildContext context, Widget child) => ConstrainedBox(
+    constraints: BoxConstraints(
+      maxWidth: MediaQuery.sizeOf(context).width * .4,
+    ),
+    child: DefaultTextStyle.merge(
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      child: child,
+    ),
+  );
 
   Future<void> _loadUpdateRepo() async {
     final repo = await _library.loadUpdateRepository();
@@ -464,9 +582,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.chart_bar),
                     title: const Text('阅读统计'),
-                    additionalInfo: Text(
-                      '今日 ${ReadingStatsService.formatDuration(_readingStats.todaySeconds)}'
-                      ' · 累计 ${ReadingStatsService.formatDuration(_readingStats.totalSeconds)}',
+                    additionalInfo: _info(
+                      context,
+                      Text(
+                        '今日 ${ReadingStatsService.formatDuration(_readingStats.todaySeconds)}'
+                        ' · 累计 ${ReadingStatsService.formatDuration(_readingStats.totalSeconds)}',
+                      ),
                     ),
                     onTap: () async {
                       await Navigator.of(context).push(
@@ -484,6 +605,25 @@ class _SettingsPageState extends State<SettingsPage> {
                     title: const Text('导出阅读笔记'),
                     additionalInfo: const Text('JSON'),
                     onTap: _exportNotes,
+                  ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.tray_arrow_down),
+                    title: const Text('导入阅读笔记'),
+                    additionalInfo: _info(context, const Text('JSON / 文本')),
+                    onTap: _importNotes,
+                  ),
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.link),
+                    title: const Text(unmatchedBookTitle),
+                    additionalInfo: _info(
+                      context,
+                      Text(_orphanCount == 0 ? '无' : '$_orphanCount 条'),
+                    ),
+                    onTap: _openUnassociatedNotes,
                   ),
                 ],
               ),
@@ -620,4 +760,3 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
-

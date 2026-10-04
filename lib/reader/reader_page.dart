@@ -134,6 +134,21 @@ class ReaderPageState extends State<ReaderPage>
   List<ReadingNote> _notes = const [];
   Map<int, List<String>> _highlights = const {};
 
+  /// Query the reader arrived at from a search result, marked in the body so the
+  /// passage they searched for is visible after the search panel closes.
+  ///
+  /// Cleared as soon as the reader turns the page or scrolls away from it.
+  String _searchHighlight = '';
+
+  /// Set while the search jump's own page change is still in flight, so that
+  /// change does not immediately clear the mark it just placed.
+  bool _searchHighlightSurvivesNextTurn = false;
+
+  /// Scroll offset the search mark was placed at (scroll mode), so scrolling
+  /// away from it clears the mark.
+  double? _searchHighlightScrollOffset;
+  static const double _searchHighlightScrollDistance = 260;
+
   /// Chapter entries are scanned once: the footer needs them on every frame.
   late final List<MapEntry<int, String>> _chapters = chapterEntries(
     widget.book,
@@ -200,6 +215,15 @@ class ReaderPageState extends State<ReaderPage>
       ..addListener(() {
         _scheduleSave();
         if (_readingMode != ReadingMode.scroll || !mounted) return;
+        // Scrolling away from a search result drops its mark, the same way
+        // turning a page does.
+        final markAt = _searchHighlightScrollOffset;
+        if (markAt != null &&
+            (_scrollController.offset - markAt).abs() >
+                _searchHighlightScrollDistance) {
+          _searchHighlightScrollOffset = null;
+          _clearSearchHighlight();
+        }
         final estimated =
             (_scrollController.offset /
                     (_fontSize * (_lineSpacing.height + 1.3)))
@@ -639,7 +663,11 @@ class ReaderPageState extends State<ReaderPage>
         : ReaderBackground.suggestTone(argb);
     setState(() => _paperTone = tone);
     await store.save(
-      ReaderBackground(kind: BackgroundKind.solid, colorValue: argb, tone: tone),
+      ReaderBackground(
+        kind: BackgroundKind.solid,
+        colorValue: argb,
+        tone: tone,
+      ),
       bookId: _bookId,
     );
   }
@@ -651,9 +679,7 @@ class ReaderPageState extends State<ReaderPage>
         : null;
     if (!mounted) return;
     setState(() {
-      _background = value.colorValue == null
-          ? null
-          : Color(value.colorValue!);
+      _background = value.colorValue == null ? null : Color(value.colorValue!);
       _paperImage = value.imageFileName;
       _paperImageOpacity = value.imageOpacity;
       _paperTone = value.tone;
@@ -714,9 +740,9 @@ class ReaderPageState extends State<ReaderPage>
         ),
       );
       if (go != true || !mounted) return;
-      await Navigator.of(context).push(
-        CupertinoPageRoute(builder: (_) => const TtsSettingsPage()),
-      );
+      await Navigator.of(
+        context,
+      ).push(CupertinoPageRoute(builder: (_) => const TtsSettingsPage()));
       return;
     }
 
@@ -1301,6 +1327,16 @@ class ReaderPageState extends State<ReaderPage>
   int _pageNumberOf(int page) =>
       _pager.isAnchored ? _pager.globalPageFor(page) : page + 1;
 
+  /// Page label for a search result, so a hit can be placed in the book.
+  ///
+  /// Uses the pager's own mapping (exact or estimated) without forcing a new
+  /// layout pass: search covers the whole book, and paginating to every hit
+  /// would be as expensive as opening every chapter.
+  String _pageLabelForParagraph(int paragraphIndex) {
+    final ref = _pager.pageRefForParagraph(paragraphIndex);
+    return '${ref.exact ? '第' : '约'} ${ref.page1} 页';
+  }
+
   String get _batteryText => _batteryLevel < 0 ? '' : '$_batteryLevel%';
 
   double get _progress {
@@ -1435,6 +1471,52 @@ class ReaderPageState extends State<ReaderPage>
         _refineScrollJump(target, attempt: attempt + 1);
       }
     });
+  }
+
+  /// Jumps to a search result and keeps the query so the passage stays marked.
+  ///
+  /// The search panel closes on tap, so without stashing the term here the
+  /// highlight would vanish with it — the reader would land on the paragraph
+  /// with nothing showing *why*. The mark lasts until the reader turns the page
+  /// (or scrolls away): it is a pointer to the passage, not a note, so it must
+  /// not linger over unrelated text.
+  void _jumpToSearchHit(int paragraphIndex, String query) {
+    final term = query.trim();
+    setState(() {
+      _searchHighlight = term;
+      // The jump itself moves the page; only a turn *after* it clears the mark.
+      _searchHighlightSurvivesNextTurn = true;
+    });
+    _jumpToParagraph(paragraphIndex);
+    // In scroll mode the jump lands at an offset: remember it so scrolling away
+    // can drop the mark.
+    _searchHighlightScrollOffset =
+        _readingMode == ReadingMode.scroll && _scrollController.hasClients
+        ? _scrollController.offset
+        : null;
+  }
+
+  /// Clears the search mark. Called when the reader turns or scrolls away.
+  void _clearSearchHighlight() {
+    if (_searchHighlight.isEmpty) return;
+    setState(() => _searchHighlight = '');
+  }
+
+  /// True when a page turn should keep the mark (the jump's own turn).
+  bool _consumeSearchHighlightTurnGuard() {
+    if (!_searchHighlightSurvivesNextTurn) return false;
+    _searchHighlightSurvivesNextTurn = false;
+    return true;
+  }
+
+  /// Applies the "the reader turned the page" rule to the search mark.
+  ///
+  /// Called from every way a page turn starts — tap/seek, finger drag, and the
+  /// page view's own notification — so the mark never outlives the passage it
+  /// was placed on, whichever gesture moved the reader on.
+  void _onPageTurned() {
+    if (_consumeSearchHighlightTurnGuard()) return;
+    _clearSearchHighlight();
   }
 
   void _jumpToParagraph(int paragraphIndex, {bool restoreChapter = false}) {
@@ -1646,6 +1728,8 @@ class ReaderPageState extends State<ReaderPage>
     }
     final flick = velocityTravel > 700;
     final commit = progress >= 0.38 || (flick && progress > 0.05);
+    // A committed drag is a page turn like any other.
+    if (commit) _onPageTurned();
 
     if (!commit && progress <= 0.01) {
       _cancelDragTurn();
@@ -1692,25 +1776,27 @@ class ReaderPageState extends State<ReaderPage>
       return;
     }
 
-    _coverAnim.animateTo(
-      end,
-      duration: commit
-          ? const Duration(milliseconds: 160)
-          : const Duration(milliseconds: 160),
-    ).whenCompleteOrCancel(() {
-      if (!mounted) return;
-      if (_dragTurn) return; // a newer drag took over
-      _dragCommitted = false;
-      if (commit && _coverAnim.isCompleted) {
-        _finishCoverTurn(to);
-        return;
-      }
-      _cancelDragTurn();
-      setState(() {
-        _currentPage = commit ? to : from;
-        _requestedPage = commit ? to : from;
-      });
-    });
+    _coverAnim
+        .animateTo(
+          end,
+          duration: commit
+              ? const Duration(milliseconds: 160)
+              : const Duration(milliseconds: 160),
+        )
+        .whenCompleteOrCancel(() {
+          if (!mounted) return;
+          if (_dragTurn) return; // a newer drag took over
+          _dragCommitted = false;
+          if (commit && _coverAnim.isCompleted) {
+            _finishCoverTurn(to);
+            return;
+          }
+          _cancelDragTurn();
+          setState(() {
+            _currentPage = commit ? to : from;
+            _requestedPage = commit ? to : from;
+          });
+        });
   }
 
   void _handleReaderPointerUp(BuildContext context, PointerUpEvent event) {
@@ -1871,7 +1957,7 @@ class ReaderPageState extends State<ReaderPage>
           child: Stack(
             children: [
               _paperLayer(context),
-            Localizations.override(
+              Localizations.override(
                 context: context,
                 delegates: const [DefaultMaterialLocalizations.delegate],
                 child: SelectionArea(
@@ -2012,10 +2098,11 @@ class ReaderPageState extends State<ReaderPage>
                                             onNoteSaved: _loadNotes,
                                           ),
                                       highlights: [
-                                      ...?_highlights[paragraphIndex],
-                                      if (_spokenSentence.isNotEmpty)
-                                        _spokenSentence,
-                                    ],
+                                        ...?_highlights[paragraphIndex],
+                                        if (_spokenSentence.isNotEmpty)
+                                          _spokenSentence,
+                                      ],
+                                      searchHighlight: _searchHighlight,
                                       isChapterHeading: _tocParagraphs.contains(
                                         paragraphIndex,
                                       ),
@@ -2051,6 +2138,9 @@ class ReaderPageState extends State<ReaderPage>
                                   if (_coverJumping || _slideBusy) {
                                     return;
                                   }
+                                  // A search mark is cleared by the first turn
+                                  // the reader makes after landing on it.
+                                  _onPageTurned();
                                   setState(() {
                                     _currentPage = index;
                                     _requestedPage = index;
@@ -2176,10 +2266,10 @@ class ReaderPageState extends State<ReaderPage>
                 },
                 // Tap outside only collapses chrome — not an exit.
                 onDismiss: () => setState(() => _showControls = false),
-              // Listening runs through the app-wide handler; null on platforms
-              // without speech support hides the action.
-              onListen: ttsHandler == null ? null : _startListening,
-              listening: _listening,
+                // Listening runs through the app-wide handler; null on platforms
+                // without speech support hides the action.
+                onListen: ttsHandler == null ? null : _startListening,
+                listening: _listening,
                 onToggleBookmark: _toggleBookmarkAtCurrentPosition,
                 progress: _progress,
                 chapterCount: _chapters.length,
@@ -2201,6 +2291,9 @@ class ReaderPageState extends State<ReaderPage>
                 keepScreenOn: _keepScreenOn,
                 volumeKeys: _volumeKeys,
                 chapters: _chapterEntries(),
+                paragraphs: widget.book.paragraphs,
+                pageLabelForParagraph: _pageLabelForParagraph,
+                onJumpToSearchHit: _jumpToSearchHit,
                 chapterPageLabels: _chapterPageLabels(),
                 bookmarks: [
                   for (final bookmark in _bookmarks)
@@ -2333,10 +2426,10 @@ class ReaderPageState extends State<ReaderPage>
                             onNoteSaved: _loadNotes,
                           ),
                           highlights: [
-                                      ...?_highlights[fragments[index].paragraphIndex],
-                                      if (_spokenSentence.isNotEmpty)
-                                        _spokenSentence,
-                                    ],
+                            ...?_highlights[fragments[index].paragraphIndex],
+                            if (_spokenSentence.isNotEmpty) _spokenSentence,
+                          ],
+                          searchHighlight: _searchHighlight,
                           isChapterHeading: _tocParagraphs.contains(
                             fragments[index].paragraphIndex,
                           ),
@@ -2416,6 +2509,7 @@ class ReaderPageState extends State<ReaderPage>
     if (_slideBusy) base = _requestedPage.clamp(0, pageCount - 1);
     final target = (base + delta).clamp(0, pageCount - 1);
     if (target == base && !_coverAnim.isAnimating && !_slideBusy) return;
+    _onPageTurned();
 
     if (_pageTurnStyle == PageTurnStyle.none) {
       setState(() {

@@ -19,6 +19,15 @@ enum ReadingNoteStyle {
       );
 }
 
+/// Storage id carried by imported notes whose book could not be identified.
+///
+/// They are kept rather than dropped, so nothing the reader imported is lost;
+/// opening one offers to link it to a book.
+const String unmatchedBookId = 'unassociated';
+
+/// Title shown for those notes, in the reader's note list and in the library.
+const String unmatchedBookTitle = '未关联笔记';
+
 class ReadingNote {
   const ReadingNote({
     required this.id,
@@ -73,6 +82,7 @@ class ReadingNote {
 class NotesLibrary {
   const NotesLibrary();
 
+  /// Reads every note. Overridden in tests with an in-memory store.
   Future<List<ReadingNote>> load() async {
     try {
       final file = await _file();
@@ -90,6 +100,7 @@ class NotesLibrary {
     }
   }
 
+  /// Writes every note. Overridden in tests with an in-memory store.
   Future<void> saveAll(List<ReadingNote> notes) async {
     final file = await _file();
     await file.writeAsString(
@@ -136,21 +147,47 @@ class NotesLibrary {
     final notes = await load();
     for (var i = 0; i < notes.length; i++) {
       if (notes[i].id == id) {
-        notes[i] = ReadingNote(
-          id: notes[i].id,
-          bookId: notes[i].bookId,
-          bookTitle: notes[i].bookTitle,
-          paragraphIndex: notes[i].paragraphIndex,
-          selectedText: notes[i].selectedText,
-          note: note,
-          createdAt: notes[i].createdAt,
-          style: notes[i].style,
-        );
+        notes[i] = _copy(notes[i], noteText: note);
         break;
       }
     }
     await saveAll(notes);
   }
+
+  /// Re-points a note at another book.
+  ///
+  /// Imported notes whose book could not be identified are stored against
+  /// [unmatchedBookId]; this is how the reader links them afterwards.
+  Future<void> updateBook(
+    String id, {
+    required String bookId,
+    required String bookTitle,
+  }) async {
+    final notes = await load();
+    for (var i = 0; i < notes.length; i++) {
+      if (notes[i].id == id) {
+        notes[i] = _copy(notes[i], bookId: bookId, bookTitle: bookTitle);
+        break;
+      }
+    }
+    await saveAll(notes);
+  }
+
+  static ReadingNote _copy(
+    ReadingNote note, {
+    String? noteText,
+    String? bookId,
+    String? bookTitle,
+  }) => ReadingNote(
+    id: note.id,
+    bookId: bookId ?? note.bookId,
+    bookTitle: bookTitle ?? note.bookTitle,
+    paragraphIndex: note.paragraphIndex,
+    selectedText: note.selectedText,
+    note: noteText ?? note.note,
+    createdAt: note.createdAt,
+    style: note.style,
+  );
 
   Future<void> delete(String id) async {
     final notes = await load();
