@@ -460,7 +460,9 @@ Future<int> saveImportedNotes({
   BookMatchCandidate? book,
   DateTime? importedAt,
 }) async {
-  final existing = await library.load();
+  // Copy before inserting: a store is free to hand back a read-only list, and
+  // importing into an empty library used to throw on its first note.
+  final existing = (await library.load()).toList();
   final now = importedAt ?? DateTime.now();
   final bookId = book?.id ?? unmatchedBookId;
   final bookTitle = book?.title ?? unmatchedBookTitle;

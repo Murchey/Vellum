@@ -10,6 +10,10 @@ import 'package:vellum/theme/vellum_theme.dart';
 
 /// In-memory notes store: the real one needs `path_provider`, which is not
 /// available in a widget test.
+///
+/// [load] hands back a **read-only** list on purpose — the real store returned
+/// `const []` before the first note existed, and mutating that is exactly how
+/// writing the first note came to throw.
 class _MemoryNotesLibrary extends NotesLibrary {
   _MemoryNotesLibrary([List<ReadingNote>? seed]) : _notes = [...?seed];
 
@@ -18,7 +22,7 @@ class _MemoryNotesLibrary extends NotesLibrary {
   List<ReadingNote> get notes => List.unmodifiable(_notes);
 
   @override
-  Future<List<ReadingNote>> load() async => [..._notes];
+  Future<List<ReadingNote>> load() async => List.unmodifiable(_notes);
 
   @override
   Future<void> saveAll(List<ReadingNote> notes) async {

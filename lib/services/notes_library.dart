@@ -83,12 +83,17 @@ class NotesLibrary {
   const NotesLibrary();
 
   /// Reads every note. Overridden in tests with an in-memory store.
+  ///
+  /// Always returns a **growable** list: [add] inserts into the result, and the
+  /// empty/error paths used to hand back `const []`, so the very first note a
+  /// reader ever wrote threw `Cannot add to an unmodifiable list` — the save was
+  /// swallowed and the composer closed with nothing written.
   Future<List<ReadingNote>> load() async {
     try {
       final file = await _file();
-      if (!await file.exists()) return const [];
+      if (!await file.exists()) return <ReadingNote>[];
       final raw = jsonDecode(await file.readAsString());
-      if (raw is! List<dynamic>) return const [];
+      if (raw is! List<dynamic>) return <ReadingNote>[];
       final notes = <ReadingNote>[
         for (final entry in raw)
           if (entry is Map<String, dynamic>) ReadingNote.fromJson(entry),
@@ -96,7 +101,7 @@ class NotesLibrary {
       notes.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return notes;
     } catch (_) {
-      return const [];
+      return <ReadingNote>[];
     }
   }
 
@@ -128,7 +133,9 @@ class NotesLibrary {
       createdAt: now,
       style: style.name,
     );
-    final notes = await load();
+    // Copy before mutating: a store is free to hand back a read-only list, and
+    // the first note must not be the one that fails.
+    final notes = (await load()).toList();
     notes.insert(0, item);
     await saveAll(notes);
     return item;
@@ -144,7 +151,7 @@ class NotesLibrary {
   }
 
   Future<void> updateNote(String id, String note) async {
-    final notes = await load();
+    final notes = (await load()).toList();
     for (var i = 0; i < notes.length; i++) {
       if (notes[i].id == id) {
         notes[i] = _copy(notes[i], noteText: note);
@@ -163,7 +170,7 @@ class NotesLibrary {
     required String bookId,
     required String bookTitle,
   }) async {
-    final notes = await load();
+    final notes = (await load()).toList();
     for (var i = 0; i < notes.length; i++) {
       if (notes[i].id == id) {
         notes[i] = _copy(notes[i], bookId: bookId, bookTitle: bookTitle);
@@ -190,7 +197,7 @@ class NotesLibrary {
   );
 
   Future<void> delete(String id) async {
-    final notes = await load();
+    final notes = (await load()).toList();
     notes.removeWhere((n) => n.id == id);
     await saveAll(notes);
   }

@@ -103,64 +103,120 @@ Future<ReadingNote?> showAddNoteSheet(
   required String selectedText,
   NotesLibrary notesLibrary = const NotesLibrary(),
   ReadingNote? existing,
-}) async {
-  final controller = TextEditingController(text: existing?.note ?? '');
-  try {
-    return await showCupertinoModalPopup<ReadingNote>(
-      context: context,
-      builder: (ctx) {
-        final keyboard = MediaQuery.of(ctx).viewInsets.bottom;
-        return Padding(
-          padding: EdgeInsets.only(bottom: keyboard),
-          child: SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: NoteSheetBody(
-                title: existing == null ? '添加笔记' : '编辑笔记',
-                selectedText: selectedText,
-                controller: controller,
-                onCancel: () => Navigator.pop(ctx),
-                onSave: () async {
-                  final body = controller.text.trim();
-                  final navigator = Navigator.of(ctx);
-                  try {
-                    if (existing != null) {
-                      await notesLibrary.updateNote(existing.id, body);
-                      navigator.pop(
-                        ReadingNote(
-                          id: existing.id,
-                          bookId: existing.bookId,
-                          bookTitle: existing.bookTitle,
-                          paragraphIndex: existing.paragraphIndex,
-                          selectedText: existing.selectedText,
-                          note: body,
-                          createdAt: existing.createdAt,
-                          style: existing.style,
-                        ),
-                      );
-                    } else {
-                      final created = await notesLibrary.add(
-                        bookId: bookId,
-                        bookTitle: bookTitle,
-                        paragraphIndex: paragraphIndex,
-                        selectedText: selectedText,
-                        note: body,
-                      );
-                      navigator.pop(created);
-                    }
-                  } catch (_) {
-                    navigator.pop();
-                  }
-                },
-              ),
-            ),
+}) {
+  return showCupertinoModalPopup<ReadingNote>(
+    context: context,
+    builder: (ctx) => _AddNoteComposer(
+      bookId: bookId,
+      bookTitle: bookTitle,
+      paragraphIndex: paragraphIndex,
+      selectedText: selectedText,
+      notesLibrary: notesLibrary,
+      existing: existing,
+    ),
+  );
+}
+
+/// The composer itself, stateful so a failed save can say so instead of closing
+/// as if it had worked — the silent `catch` is what made a broken save look like
+/// "点了保存没有任何反应".
+class _AddNoteComposer extends StatefulWidget {
+  const _AddNoteComposer({
+    required this.bookId,
+    required this.bookTitle,
+    required this.paragraphIndex,
+    required this.selectedText,
+    required this.notesLibrary,
+    this.existing,
+  });
+
+  final String bookId;
+  final String bookTitle;
+  final int paragraphIndex;
+  final String selectedText;
+  final NotesLibrary notesLibrary;
+  final ReadingNote? existing;
+
+  @override
+  State<_AddNoteComposer> createState() => _AddNoteComposerState();
+}
+
+class _AddNoteComposerState extends State<_AddNoteComposer> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.existing?.note ?? '',
+  );
+  String? _error;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final body = _controller.text.trim();
+    final navigator = Navigator.of(context);
+    final existing = widget.existing;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      if (existing != null) {
+        await widget.notesLibrary.updateNote(existing.id, body);
+        navigator.pop(
+          ReadingNote(
+            id: existing.id,
+            bookId: existing.bookId,
+            bookTitle: existing.bookTitle,
+            paragraphIndex: existing.paragraphIndex,
+            selectedText: existing.selectedText,
+            note: body,
+            createdAt: existing.createdAt,
+            style: existing.style,
           ),
         );
-      },
+      } else {
+        final created = await widget.notesLibrary.add(
+          bookId: widget.bookId,
+          bookTitle: widget.bookTitle,
+          paragraphIndex: widget.paragraphIndex,
+          selectedText: widget.selectedText,
+          note: body,
+        );
+        navigator.pop(created);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _error = '保存失败：$error';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final keyboard = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboard),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+          child: NoteSheetBody(
+            title: widget.existing == null ? '添加笔记' : '编辑笔记',
+            selectedText: widget.selectedText,
+            controller: _controller,
+            error: _error,
+            onCancel: () => Navigator.pop(context),
+            onSave: _save,
+          ),
+        ),
+      ),
     );
-  } finally {
-    controller.dispose();
   }
 }
 
@@ -172,6 +228,7 @@ class NoteSheetBody extends StatelessWidget {
     required this.controller,
     required this.onCancel,
     required this.onSave,
+    this.error,
     super.key,
   });
 
@@ -181,23 +238,19 @@ class NoteSheetBody extends StatelessWidget {
   final VoidCallback onCancel;
   final VoidCallback onSave;
 
+  /// Shown when the last save attempt failed, so the reader is not left thinking
+  /// it worked.
+  final String? error;
+
   @override
   Widget build(BuildContext context) {
     final isDark = CupertinoTheme.of(context).brightness == Brightness.dark;
     final bg = isDark ? const Color(0xff2c2c2e) : const Color(0xfff7f7f7);
-    final quoteBg = isDark
-        ? const Color(0xff3a3a3c)
-        : const Color(0xffe9e9ec);
+    final quoteBg = isDark ? const Color(0xff3a3a3c) : const Color(0xffe9e9ec);
     final ink = isDark ? const Color(0xfff2f2f7) : const Color(0xff1c1c1e);
-    final muted = isDark
-        ? const Color(0xff98989f)
-        : const Color(0xff6c6c70);
-    final fieldBg = isDark
-        ? const Color(0xff1c1c1e)
-        : CupertinoColors.white;
-    final fieldInk = isDark
-        ? const Color(0xfff2f2f7)
-        : const Color(0xff1c1c1e);
+    final muted = isDark ? const Color(0xff98989f) : const Color(0xff6c6c70);
+    final fieldBg = isDark ? const Color(0xff1c1c1e) : CupertinoColors.white;
+    final fieldInk = isDark ? const Color(0xfff2f2f7) : const Color(0xff1c1c1e);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
       decoration: BoxDecoration(
@@ -247,6 +300,16 @@ class NoteSheetBody extends StatelessWidget {
             textInputAction: TextInputAction.newline,
           ),
           const SizedBox(height: 12),
+          if (error != null) ...[
+            Text(
+              error!,
+              style: const TextStyle(
+                fontSize: 12,
+                color: CupertinoColors.systemRed,
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           Row(
             children: [
               Expanded(
@@ -291,12 +354,8 @@ Future<void> showParagraphNotesSheet(
       final isDark = CupertinoTheme.of(ctx).brightness == Brightness.dark;
       final bg = isDark ? const Color(0xff2c2c2e) : const Color(0xfff7f7f7);
       final ink = isDark ? const Color(0xfff2f2f7) : const Color(0xff1c1c1e);
-      final muted = isDark
-          ? const Color(0xff98989f)
-          : const Color(0xff6c6c70);
-      final tileBg = isDark
-          ? const Color(0xff3a3a3c)
-          : CupertinoColors.white;
+      final muted = isDark ? const Color(0xff98989f) : const Color(0xff6c6c70);
+      final tileBg = isDark ? const Color(0xff3a3a3c) : CupertinoColors.white;
       return StatefulBuilder(
         builder: (ctx, setLocal) {
           return SafeArea(

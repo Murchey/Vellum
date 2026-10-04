@@ -1,9 +1,10 @@
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show EditableTextState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vellum/reader/reader_controls.dart';
 import 'package:vellum/reader/reader_models.dart';
+import 'package:vellum/reader/reader_page.dart';
 import 'package:vellum/reader/reader_paragraph.dart';
+import 'package:vellum/services/library_models.dart';
 import 'package:vellum/services/book_importer.dart';
 import 'package:vellum/services/reader_background.dart';
 
@@ -164,6 +165,45 @@ void main() {
     );
   });
 
+  testWidgets('turning the page drops the search mark', (tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+
+    final book = ImportedBook(
+      title: '测试书',
+      format: BookFormat.txt,
+      paragraphs: [for (var i = 0; i < 60; i++) '第${i + 1}段：太祖本纪，天下大乱，群雄并起。'],
+    );
+    await tester.pumpWidget(
+      CupertinoApp(
+        home: ReaderPage(
+          book: book,
+          initialState: const ReadingState(mode: 'page', pageTurn: 'none'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final state = tester.state(find.byType(ReaderPage)) as ReaderPageState;
+    // A tapped result places the mark, then the jump's own page change runs.
+    state.debugPlaceSearchHighlight('天下');
+    await tester.pumpAndSettle();
+    expect(
+      state.debugSearchHighlight,
+      '天下',
+      reason: 'the mark is live once the reader lands on the passage',
+    );
+
+    // Turning the page — not the jump itself — is what drops it.
+    state.debugTurnPage();
+    await tester.pumpAndSettle();
+    expect(
+      state.debugSearchHighlight,
+      isEmpty,
+      reason: 'the mark must not survive the first page turn',
+    );
+  });
+
   testWidgets('without a search term nothing is marked', (tester) async {
     await tester.pumpWidget(
       const CupertinoApp(
@@ -201,7 +241,7 @@ void main() {
   });
 }
 
-Widget _noContextMenu(BuildContext context, EditableTextState state) =>
+Widget _noContextMenu(BuildContext context, dynamic state) =>
     const SizedBox.shrink();
 
 class _Book extends ImportedBook {

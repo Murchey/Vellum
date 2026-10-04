@@ -1117,6 +1117,24 @@ class ReaderPageState extends State<ReaderPage>
   @visibleForTesting
   int get debugPageCount => _pageCount;
 
+  /// The live search mark, for asserting when it is placed and dropped.
+  @visibleForTesting
+  String get debugSearchHighlight => _searchHighlight;
+
+  /// Places a search mark the way a tapped result does, including the guard that
+  /// stops the jump's own page change from clearing it.
+  @visibleForTesting
+  void debugPlaceSearchHighlight(String query) {
+    setState(() {
+      _searchHighlight = query.trim();
+      _searchHighlightSurvivesNextTurn = true;
+    });
+  }
+
+  /// Turns one page the same way a tap does, for the mark's lifetime rule.
+  @visibleForTesting
+  void debugTurnPage() => _changePage(context, 1);
+
   @visibleForTesting
   void debugJumpToPage(int page) => _jumpToParagraph(
     _pages.isEmpty
