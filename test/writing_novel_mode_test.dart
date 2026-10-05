@@ -39,4 +39,61 @@ void main() {
       expect(out, contains('　　正文。'));
     });
   });
+
+  group('novel paragraph break (Enter)', () {
+    test('a single trailing newline becomes a new indented paragraph', () {
+      // Writer pressed Enter at the end of a finished paragraph.
+      expect(
+        novelParagraphBreak('　　他走进旧书店。'),
+        '　　他走进旧书店。\n\n　　',
+      );
+    });
+
+    test('an existing trailing newline is upgraded, not doubled', () {
+      expect(
+        novelParagraphBreak('　　他走进旧书店。\n'),
+        '　　他走进旧书店。\n\n　　',
+      );
+    });
+
+    test('a blank line already open only gains the indent', () {
+      expect(
+        novelParagraphBreak('　　他走进旧书店。\n\n'),
+        '　　他走进旧书店。\n\n　　',
+      );
+      expect(
+        novelParagraphBreak('　　他走进旧书店。\n\n　　'),
+        '　　他走进旧书店。\n\n　　',
+      );
+    });
+
+    test('keeps the caret at the end of the inserted indent', () {
+      final result = novelParagraphBreakWithCaret('　　一段。');
+      expect(result.text, '　　一段。\n\n　　');
+      expect(result.caretOffset, result.text.length);
+    });
+
+    test('formatting while typing preserves the open line at the end', () {
+      // Writer pressed Enter and is sitting on the next line mid-thought.
+      const live = '　　第一段。\n\n　　';
+      expect(applyNovelFormatting(live, keepTrailingNewlines: true), live);
+
+      const openLine = '　　第一段。\n';
+      expect(
+        applyNovelFormatting(openLine, keepTrailingNewlines: true),
+        openLine,
+      );
+    });
+
+    test('an indent-only line is an open paragraph, not a blank', () {
+      // U+3000 is whitespace to String.trim() — it must not swallow the caret
+      // line the writer just opened with Enter. (Do not use trimRight here:
+      // that would eat the indent too.)
+      final out = applyNovelFormatting(
+        '　　第一段。\n\n　　',
+        keepTrailingNewlines: true,
+      );
+      expect(out, '　　第一段。\n\n　　');
+    });
+  });
 }

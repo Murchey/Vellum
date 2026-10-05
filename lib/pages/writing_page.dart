@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -6,6 +7,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../reader/reader_font_picker.dart';
+import '../services/font_registry.dart';
+import '../services/font_storage.dart';
+import '../services/library_models.dart';
 import '../services/writing_library.dart';
 import '../theme/vellum_theme.dart';
 import '../widgets/markdown_preview.dart';
@@ -314,32 +319,54 @@ class _EmptyWritingState extends StatelessWidget {
   }
 }
 
-/// Editor for one writing document. Auto-saves drafts; can export .md/.txt.
+/// Editor for one writing document. Auto-saves on every edit; can export .md/.txt.
 class WritingEditorPage extends StatefulWidget {
-  const WritingEditorPage({required this.document, this.onChanged, super.key});
+  const WritingEditorPage({
+    required this.document,
+    this.onChanged,
+    this.library,
+    super.key,
+  });
 
   final WritingDocument document;
   final VoidCallback? onChanged;
+
+  /// Test hook: defaults to the on-disk [WritingLibrary].
+  final WritingLibrary? library;
 
   @override
   State<WritingEditorPage> createState() => _WritingEditorPageState();
 }
 
 class _WritingEditorPageState extends State<WritingEditorPage> {
-  final _library = const WritingLibrary();
+  late final WritingLibrary _library = widget.library ?? const WritingLibrary();
   late final TextEditingController _titleController;
   late final TextEditingController _bodyController;
   late WritingFormat _format;
   late WritingDocument _document;
   bool _saving = false;
   bool _dirty = false;
+
+  /// Typing pauses briefly before the disk write, so a burst of keystrokes is
+  /// one save rather than one per character.
+  static const Duration _autoSaveDelay = Duration(milliseconds: 600);
+  Timer? _autoSaveTimer;
+  Timer? _novelFormatTimer;
   final _typoStore = const WritingTypographyStore();
+  final _fontStorage = const FontStorage();
   WritingTypography _typo = const WritingTypography();
+  List<InstalledFont> _installedFonts = const [];
 
   /// Markdown drafts can be flipped to a rendered preview.
   bool _previewing = false;
 
   bool get _canPreview => _format == WritingFormat.md;
+
+  String get _saveStatusText {
+    if (_saving) return '保存中…';
+    if (_dirty) return '即将自动保存';
+    return '已自动保存';
+  }
 
   @override
   void initState() {
@@ -348,9 +375,11 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
     _format = _document.format;
     _titleController = TextEditingController(text: _document.title);
     _bodyController = TextEditingController(text: _document.body);
+    _lastBodyText = _document.body;
     _titleController.addListener(_markDirty);
-    _bodyController.addListener(_markDirty);
+    _bodyController.addListener(_onBodyChanged);
     _loadTypo();
+    _loadFonts();
   }
 
   Future<void> _loadTypo() async {
@@ -362,24 +391,93 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
     } catch (_) {}
   }
 
-  Future<void> _applyTypo(WritingTypography next) async {
-    setState(() => _typo = next);
+  Future<void> _loadFonts() async {
+    if (Platform.environment['FLUTTER_TEST'] == 'true') return;
     try {
-      await _typoStore.save(next);
+      final fonts = await _fontStorage
+          .listFonts()
+          .timeout(const Duration(seconds: 2));
+      if (mounted) setState(() => _installedFonts = fonts);
     } catch (_) {}
   }
 
-  /// 小说模式：一键排版正文（段首两格 + 段间空行）。
-  void _applyNovelMode() {
-    final src = _bodyController.text;
-    final formatted = applyNovelFormatting(src);
-    if (formatted == src) {
-      _showToast('已是小说排版，无需调整');
+  /// 小说排版 only applies to 纯文本 drafts. Markdown owns its own rules
+  /// (headings, lists, fences), so the novel switch is inert in MD mode.
+  bool get _novelModeActive =>
+      _typo.novelMode && _format == WritingFormat.txt;
+
+  void _applyTypo(WritingTypography next) {
+    final novelTurnedOn = next.novelMode && !_typo.novelMode;
+    setState(() => _typo = next);
+    // Persist in the background — the sheet must not wait on disk.
+    unawaited(() async {
+      try {
+        await _typoStore.save(next);
+      } catch (_) {}
+    }());
+    if (novelTurnedOn && _novelModeActive) {
+      _applyNovelFormat();
+    }
+  }
+
+  String _lastBodyText = '';
+
+  void _onBodyChanged() {
+    _markDirty();
+    if (!_novelModeActive) return;
+    _maybeOpenNovelParagraph();
+    _lastBodyText = _bodyController.text;
+  }
+
+  /// Enter at the end in 小说模式 opens a proper new paragraph (段首两格).
+  ///
+  /// Deliberately a tiny rewrite of the tail only. The old live formatter
+  /// rewrote the whole document on a timer, which ate the caret's newline and
+  /// broke IME composition — that is what made 换行 feel broken.
+  void _maybeOpenNovelParagraph() {
+    final text = _bodyController.text;
+    final sel = _bodyController.selection;
+    if (!sel.isValid || !sel.isCollapsed) return;
+    // Never rewrite under an active IME composition.
+    if (_bodyController.value.composing.isValid) return;
+    if (sel.extentOffset != text.length) return;
+    if (text == _lastBodyText) return;
+    // Only react when a newline was just added at the end.
+    if (!text.endsWith('\n')) return;
+    if (text.endsWith('\n\n　　')) return;
+
+    final edit = novelParagraphBreakWithCaret(text);
+    if (edit.text == text) return;
+    _bodyController.value = TextEditingValue(
+      text: edit.text,
+      selection: TextSelection.collapsed(offset: edit.caretOffset),
+    );
+    _lastBodyText = edit.text;
+    _markDirty();
+  }
+
+  /// One-shot rewrite used when 小说模式 is switched on. Keeps any open line
+  /// at the end so the caret does not lose the writer's current Enter.
+  void _applyNovelFormat() {
+    final text = _bodyController.text;
+    final formatted = applyNovelFormatting(text, keepTrailingNewlines: true);
+    if (formatted == text) {
+      _lastBodyText = text;
       return;
     }
-    _bodyController.text = formatted;
+    final sel = _bodyController.selection;
+    final wasAtEnd =
+        !sel.isValid || sel.extentOffset >= text.length || text.isEmpty;
+    _bodyController.value = TextEditingValue(
+      text: formatted,
+      selection: wasAtEnd
+          ? TextSelection.collapsed(offset: formatted.length)
+          : TextSelection.collapsed(
+              offset: sel.extentOffset.clamp(0, formatted.length),
+            ),
+    );
+    _lastBodyText = formatted;
     _markDirty();
-    _showToast('已套用小说排版：段首缩进 + 段距');
   }
 
   void _showTypoSheet() {
@@ -387,13 +485,42 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
       context: context,
       builder: (ctx) => _WritingTypoSheet(
         initial: _typo,
+        installedFonts: _installedFonts,
+        novelAvailable: _format == WritingFormat.txt,
         onChanged: _applyTypo,
+        onActivateImportedFont: _activateImportedFont,
+        onRefreshFonts: () async {
+          await _loadFonts();
+          return _installedFonts;
+        },
       ),
     );
   }
 
+  /// Registers an imported TTF for the editor (same path as the reader).
+  Future<void> _activateImportedFont(InstalledFont font) async {
+    try {
+      final bytes = await _fontStorage.loadFontByName(font.name);
+      if (bytes != null) {
+        await FontRegistry.load(font.family, bytes);
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    _autoSaveTimer?.cancel();
+    _novelFormatTimer?.cancel();
+    // Swipe-back / system pop skips 完成; flush whatever is still dirty so the
+    // last keystrokes are not lost. Fire-and-forget: dispose cannot await.
+    if (_dirty) {
+      final snapshot = _document.copyWith(
+        title: _titleController.text,
+        body: _bodyController.text,
+        format: _format,
+      );
+      unawaited(_library.upsert(snapshot));
+    }
     _titleController.dispose();
     _bodyController.dispose();
     super.dispose();
@@ -402,41 +529,46 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
   void _markDirty() {
     // Rebuild every keystroke so the footer 字/词 count stays live.
     setState(() => _dirty = true);
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(_autoSaveDelay, () {
+      if (mounted) unawaited(_persist());
+    });
   }
 
-  Future<void> _persist({bool silent = true}) async {
+  /// Writes the draft to the local library. Silent — the editor no longer has
+  /// a save button; a typing pause (or leaving the page) is the commit point.
+  Future<void> _persist() async {
+    if (_saving) {
+      // A write is already in flight; retry with whatever is on screen now.
+      _autoSaveTimer?.cancel();
+      _autoSaveTimer = Timer(const Duration(milliseconds: 120), () {
+        if (mounted) unawaited(_persist());
+      });
+      return;
+    }
     final next = _document.copyWith(
       title: _titleController.text,
       body: _bodyController.text,
       format: _format,
     );
     setState(() => _saving = true);
-    final saved = await _library.upsert(next);
-    if (!mounted) return;
-    setState(() {
-      _document = saved;
-      _dirty = false;
-      _saving = false;
-    });
-    widget.onChanged?.call();
-    if (!silent) {
-      await showCupertinoDialog<void>(
-        context: context,
-        builder: (context) => CupertinoAlertDialog(
-          title: const Text('已保存'),
-          content: Text('《${saved.displayTitle}》已保存到本机文稿。'),
-          actions: [
-            CupertinoDialogAction(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('好'),
-            ),
-          ],
-        ),
-      );
+    try {
+      final saved = await _library.upsert(next);
+      if (!mounted) return;
+      setState(() {
+        _document = saved;
+        _dirty = false;
+        _saving = false;
+      });
+      widget.onChanged?.call();
+    } catch (_) {
+      // Keep the text dirty so the next pause (or export/leave) retries.
+      if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _exportFile() async {
+    _autoSaveTimer?.cancel();
     if (_dirty) await _persist();
     final text = _bodyController.text;
     final bytes = Uint8List.fromList(utf8.encode(text));
@@ -538,6 +670,12 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
       if (value != WritingFormat.md) _previewing = false;
     });
     _markDirty();
+    // Entering 纯文本 with the global novel switch on applies it once;
+    // leaving into Markdown just lets the switch go inert (no rewrite).
+    if (_novelModeActive) {
+      _lastBodyText = _bodyController.text;
+      _applyNovelFormat();
+    }
   }
 
   @override
@@ -556,6 +694,7 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
         leading: CupertinoButton(
           padding: EdgeInsets.zero,
           onPressed: () async {
+            _autoSaveTimer?.cancel();
             if (_dirty) await _persist();
             if (!context.mounted) return;
             Navigator.pop(context);
@@ -575,19 +714,6 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
               child: const Icon(CupertinoIcons.textformat_size, size: 20),
             ),
             CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              minimumSize: const Size(40, 40),
-              onPressed: _applyNovelMode,
-              child: Text(
-                '小说',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: VellumTheme.accentOf(context),
-                ),
-              ),
-            ),
-            CupertinoButton(
               padding: const EdgeInsets.symmetric(horizontal: 6),
               minimumSize: const Size(40, 40),
               onPressed: _confirmDelete,
@@ -602,20 +728,6 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
               minimumSize: const Size(40, 40),
               onPressed: _exportFile,
               child: Icon(CupertinoIcons.share_up, size: 20, color: accent),
-            ),
-            CupertinoButton(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              minimumSize: const Size(40, 40),
-              onPressed: _saving ? null : () => _persist(silent: false),
-              child: _saving
-                  ? const CupertinoActivityIndicator(radius: 9)
-                  : Text(
-                      '保存',
-                      style: TextStyle(
-                        color: _dirty ? accent : muted,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
             ),
           ],
         ),
@@ -740,7 +852,7 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
               ),
               child: Text(
                 '${previewDoc.characterCount} 字 · ${previewDoc.wordCount} 词'
-                '${_dirty ? ' · 未保存' : ''}',
+                ' · $_saveStatusText',
                 style: TextStyle(color: muted, fontSize: 11),
               ),
             ),
@@ -751,28 +863,95 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
   }
 }
 
-/// Bottom sheet: font family, size, and weight for the writing editor.
-class _WritingTypoSheet extends StatelessWidget {
-  const _WritingTypoSheet({required this.initial, required this.onChanged});
+/// Bottom sheet: font, size, weight, and the novel-mode switch.
+///
+/// State is local so every tap paints immediately — the parent only receives
+/// the new value and persists it in the background. Font picking reuses the
+/// reader's [ReaderFontPickerSheet] so imported TTFs look and behave the same.
+class _WritingTypoSheet extends StatefulWidget {
+  const _WritingTypoSheet({
+    required this.initial,
+    required this.installedFonts,
+    required this.novelAvailable,
+    required this.onChanged,
+    required this.onActivateImportedFont,
+    required this.onRefreshFonts,
+  });
 
   final WritingTypography initial;
+  final List<InstalledFont> installedFonts;
+
+  /// False for Markdown drafts: novel layout is a plain-text rule.
+  final bool novelAvailable;
   final ValueChanged<WritingTypography> onChanged;
+  final Future<void> Function(InstalledFont) onActivateImportedFont;
+  final Future<List<InstalledFont>> Function() onRefreshFonts;
 
-  static const _families = <String?>[
-    null,
-    'serif',
-    'monospace',
-    'sans-serif',
-    'Cursive',
-  ];
+  @override
+  State<_WritingTypoSheet> createState() => _WritingTypoSheetState();
+}
 
-  static const _familyLabels = <String>[
-    '默认',
-    '衬线',
-    '等宽',
-    '无衬线',
-    '手写',
-  ];
+class _WritingTypoSheetState extends State<_WritingTypoSheet> {
+  late WritingTypography _typo = widget.initial;
+  late List<InstalledFont> _fonts = widget.installedFonts;
+  bool _busyFont = false;
+
+  void _update(WritingTypography next) {
+    setState(() => _typo = next);
+    widget.onChanged(next);
+  }
+
+  String get _fontLabel {
+    final family = _typo.fontFamily;
+    if (family == null || family == 'Georgia' || family == 'Default') {
+      return '系统字体';
+    }
+    for (final font in _fonts) {
+      if (font.family == family) return font.label;
+    }
+    // Built-in aliases from older drafts.
+    return switch (family) {
+      'serif' => '衬线',
+      'monospace' => '等宽',
+      'sans-serif' => '无衬线',
+      'Cursive' => '手写',
+      _ => family,
+    };
+  }
+
+  Future<void> _openFontPicker() async {
+    final fonts = await widget.onRefreshFonts();
+    if (!mounted) return;
+    setState(() => _fonts = fonts);
+    await showCupertinoModalPopup<void>(
+      context: context,
+      builder: (ctx) => ReaderFontPickerSheet(
+        installedFonts: _fonts,
+        activeFamily: _typo.fontFamily ?? 'Georgia',
+        onSelectSystemFont: (family) {
+          Navigator.pop(ctx);
+          final isDefault = family == 'Georgia' || family == 'Default';
+          _update(
+            _typo.copyWith(
+              fontFamily: isDefault ? null : family,
+              clearFont: isDefault,
+            ),
+          );
+        },
+        onSelectImportedFont: (font) async {
+          setState(() => _busyFont = true);
+          await widget.onActivateImportedFont(font);
+          if (!mounted) {
+            setState(() => _busyFont = false);
+            return;
+          }
+          setState(() => _busyFont = false);
+          if (ctx.mounted) Navigator.pop(ctx);
+          _update(_typo.copyWith(fontFamily: font.family));
+        },
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -780,6 +959,7 @@ class _WritingTypoSheet extends StatelessWidget {
     final muted = VellumTheme.mutedOf(context);
     final accent = VellumTheme.accentOf(context);
     final card = VellumTheme.cardOf(context);
+    final line = VellumTheme.lineOf(context);
     return SafeArea(
       top: false,
       child: Container(
@@ -802,26 +982,59 @@ class _WritingTypoSheet extends StatelessWidget {
                 color: ink,
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 4),
+            Text(
+              '对所有文稿全局生效',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 11, color: muted),
+            ),
+            const SizedBox(height: 12),
+            // Font row — same picker as the reading page (system + imported).
             Text('字体', style: TextStyle(fontSize: 12, color: muted)),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (var i = 0; i < _families.length; i++)
-                  _chip(
-                    context,
-                    label: _familyLabels[i],
-                    selected: initial.fontFamily == _families[i],
-                    onTap: () => onChanged(
-                      initial.copyWith(
-                        fontFamily: _families[i],
-                        clearFont: _families[i] == null,
+            CupertinoButton(
+              padding: EdgeInsets.zero,
+              onPressed: _busyFont ? null : _openFontPicker,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: .08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: line),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _busyFont ? '正在加载字体…' : _fontLabel,
+                        style: TextStyle(
+                          color: ink,
+                          fontSize: 16,
+                          fontFamily: _typo.fontFamily,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                    Text(
+                      '永Aa',
+                      style: TextStyle(
+                        color: muted,
+                        fontSize: 16,
+                        fontFamily: _typo.fontFamily,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      CupertinoIcons.right_chevron,
+                      size: 16,
+                      color: muted,
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Text('字号', style: TextStyle(fontSize: 12, color: muted)),
@@ -830,9 +1043,9 @@ class _WritingTypoSheet extends StatelessWidget {
                 CupertinoButton(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   minimumSize: const Size(36, 36),
-                  onPressed: () => onChanged(
-                    initial.copyWith(
-                      fontSize: (initial.fontSize - 1).clamp(
+                  onPressed: () => _update(
+                    _typo.copyWith(
+                      fontSize: (_typo.fontSize - 1).clamp(
                         WritingTypography.minSize,
                         WritingTypography.maxSize,
                       ),
@@ -842,22 +1055,21 @@ class _WritingTypoSheet extends StatelessWidget {
                 ),
                 Expanded(
                   child: CupertinoSlider(
-                    value: initial.fontSize.clamp(
+                    value: _typo.fontSize.clamp(
                       WritingTypography.minSize,
                       WritingTypography.maxSize,
                     ),
                     min: WritingTypography.minSize,
                     max: WritingTypography.maxSize,
-                    onChanged: (v) =>
-                        onChanged(initial.copyWith(fontSize: v)),
+                    onChanged: (v) => _update(_typo.copyWith(fontSize: v)),
                   ),
                 ),
                 CupertinoButton(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   minimumSize: const Size(36, 36),
-                  onPressed: () => onChanged(
-                    initial.copyWith(
-                      fontSize: (initial.fontSize + 1).clamp(
+                  onPressed: () => _update(
+                    _typo.copyWith(
+                      fontSize: (_typo.fontSize + 1).clamp(
                         WritingTypography.minSize,
                         WritingTypography.maxSize,
                       ),
@@ -868,7 +1080,7 @@ class _WritingTypoSheet extends StatelessWidget {
                 SizedBox(
                   width: 36,
                   child: Text(
-                    '${initial.fontSize.round()}',
+                    '${_typo.fontSize.round()}',
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12, color: muted),
                   ),
@@ -879,7 +1091,7 @@ class _WritingTypoSheet extends StatelessWidget {
             Text('字重', style: TextStyle(fontSize: 12, color: muted)),
             const SizedBox(height: 8),
             CupertinoSlidingSegmentedControl<int>(
-              groupValue: initial.weightIndex,
+              groupValue: _typo.weightIndex,
               children: {
                 for (var i = 0; i < WritingTypography.weightLabels.length; i++)
                   i: Padding(
@@ -889,8 +1101,42 @@ class _WritingTypoSheet extends StatelessWidget {
               },
               onValueChanged: (v) {
                 if (v == null) return;
-                onChanged(initial.copyWith(weightIndex: v));
+                _update(_typo.copyWith(weightIndex: v));
               },
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '小说模式',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: widget.novelAvailable ? ink : muted,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.novelAvailable
+                            ? '开启后自动排版：段首两格缩进 · 段间空行'
+                            : 'Markdown 模式下不启用，切换到纯文本即可使用',
+                        style: TextStyle(fontSize: 12, color: muted),
+                      ),
+                    ],
+                  ),
+                ),
+                CupertinoSwitch(
+                  value: widget.novelAvailable && _typo.novelMode,
+                  activeTrackColor: accent,
+                  onChanged: widget.novelAvailable
+                      ? (v) => _update(_typo.copyWith(novelMode: v))
+                      : null,
+                ),
+              ],
             ),
             const SizedBox(height: 14),
             Container(
@@ -900,12 +1146,14 @@ class _WritingTypoSheet extends StatelessWidget {
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
-                '示例文字 The quick brown fox',
+                (widget.novelAvailable && _typo.novelMode)
+                    ? '　　示例文字 The quick brown fox'
+                    : '示例文字 The quick brown fox',
                 style: TextStyle(
                   color: ink,
-                  fontSize: initial.fontSize,
-                  fontFamily: initial.fontFamily,
-                  fontWeight: initial.fontWeight,
+                  fontSize: _typo.fontSize,
+                  fontFamily: _typo.fontFamily,
+                  fontWeight: _typo.fontWeight,
                 ),
               ),
             ),
@@ -915,41 +1163,6 @@ class _WritingTypoSheet extends StatelessWidget {
               child: Text('完成', style: TextStyle(color: accent)),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _chip(
-    BuildContext context, {
-    required String label,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    final accent = VellumTheme.accentOf(context);
-    final ink = VellumTheme.inkOf(context);
-    return CupertinoButton(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      minimumSize: const Size(0, 32),
-      onPressed: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? accent.withValues(alpha: .15)
-              : VellumTheme.cardOf(context),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: selected ? accent : VellumTheme.lineOf(context),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: selected ? accent : ink,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-          ),
         ),
       ),
     );

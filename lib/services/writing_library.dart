@@ -20,11 +20,35 @@ enum WritingFormat {
       );
 }
 
+/// True only for ASCII blanks. `String.trim()` also eats U+3000 (`　`), which
+/// is the novel indent — a line that is just `　　` is an open paragraph, not
+/// a blank line.
+bool _isAsciiBlank(String line) {
+  for (final unit in line.codeUnits) {
+    if (unit != 0x20 && unit != 0x09) return false;
+  }
+  return true;
+}
+
 /// 小说模式排版：段首两格缩进 + 段落之间空一行。
 /// 不改标题、列表、引用、代码块；已缩进的段落保持原样。
-String applyNovelFormatting(String source) {
+///
+/// [keepTrailingNewlines] keeps the writer's open line / empty paragraph at the
+/// end. Live editing must pass true — stripping those newlines is what made
+/// Enter look broken (the caret line vanished on the next format pass).
+String applyNovelFormatting(
+  String source, {
+  bool keepTrailingNewlines = false,
+}) {
   final normalized = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
-  final lines = normalized.split('\n');
+  // Trailing `\n`s are the writer sitting on a new line; never treat them as
+  // content to collapse away when the editor is live.
+  final trailingMatch = RegExp(r'\n+$').firstMatch(normalized);
+  final trailingNewlines = trailingMatch?.group(0)?.length ?? 0;
+  final bodySource = trailingNewlines > 0
+      ? normalized.substring(0, normalized.length - trailingNewlines)
+      : normalized;
+  final lines = bodySource.split('\n');
   final out = <String>[];
   var inFence = false;
   var buffer = <String>[];
@@ -60,7 +84,7 @@ String applyNovelFormatting(String source) {
       out.add(line);
       continue;
     }
-    if (line.trim().isEmpty) {
+    if (_isAsciiBlank(line)) {
       flushParagraph();
       // collapse extra blank lines later
       continue;
@@ -74,7 +98,55 @@ String applyNovelFormatting(String source) {
   var joined = out.join('\n').replaceAll(RegExp(r'\n{3,}'), '\n\n');
   joined = joined.replaceAll(RegExp(r'^\n+'), '');
   joined = joined.replaceAll(RegExp(r'\n+$'), '');
+  if (keepTrailingNewlines && trailingNewlines > 0) {
+    // Keep at least the open line the caret is on (one `\n`). An extra blank
+    // paragraph (two `\n`) is preserved as-is so Enter Enter still feels open.
+    final keep = trailingNewlines >= 2 ? trailingNewlines : 1;
+    joined = '$joined${'\n' * keep}';
+  }
   return joined;
+}
+
+/// Result of inserting a novel-mode paragraph break at the caret.
+class NovelParagraphEdit {
+  const NovelParagraphEdit({required this.text, required this.caretOffset});
+
+  final String text;
+  final int caretOffset;
+}
+
+/// Enter in 小说模式: finish the current paragraph and open the next one
+/// already indented (`段首两格`), so the writer can type immediately.
+///
+/// Idempotent — applying it to a break that is already open is a no-op.
+String novelParagraphBreak(String source) {
+  return novelParagraphBreakWithCaret(source).text;
+}
+
+NovelParagraphEdit novelParagraphBreakWithCaret(String source) {
+  final text = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  // Already sitting on an indented new paragraph.
+  if (text.endsWith('\n\n　　')) {
+    return NovelParagraphEdit(text: text, caretOffset: text.length);
+  }
+  // One Enter + indent: promote to a real paragraph gap.
+  if (text.endsWith('\n　　')) {
+    final next = '${text.substring(0, text.length - 3)}\n\n　　';
+    return NovelParagraphEdit(text: next, caretOffset: next.length);
+  }
+  // Enter Enter, waiting for the indent.
+  if (text.endsWith('\n\n')) {
+    final next = '$text　　';
+    return NovelParagraphEdit(text: next, caretOffset: next.length);
+  }
+  // Single Enter at the end — open the next paragraph properly.
+  if (text.endsWith('\n')) {
+    final next = '$text\n　　';
+    return NovelParagraphEdit(text: next, caretOffset: next.length);
+  }
+  // No newline yet: finish this paragraph and open the next.
+  final next = '$text\n\n　　';
+  return NovelParagraphEdit(text: next, caretOffset: next.length);
 }
 
 final RegExp _novelSkipPrefix = RegExp(
@@ -87,14 +159,19 @@ class WritingTypography {
     this.fontFamily,
     this.fontSize = 16,
     this.weightIndex = 1,
+    this.novelMode = false,
   });
 
-  /// null = system default; otherwise a font-family alias.
+  /// null = system default; otherwise a font-family alias (built-in or
+  /// imported TTF family registered through FontRegistry).
   final String? fontFamily;
   final double fontSize;
 
   /// 0 细 / 1 常规 / 2 中粗 / 3 粗
   final int weightIndex;
+
+  /// 小说排版开关：开启后输入时自动「段首两格 + 段间空行」，无需每次点按钮。
+  final bool novelMode;
 
   static const weightLabels = ['细', '常规', '中粗', '粗'];
   static const weightValues = [
@@ -115,16 +192,19 @@ class WritingTypography {
     bool clearFont = false,
     double? fontSize,
     int? weightIndex,
+    bool? novelMode,
   }) => WritingTypography(
     fontFamily: clearFont ? null : (fontFamily ?? this.fontFamily),
     fontSize: fontSize ?? this.fontSize,
     weightIndex: weightIndex ?? this.weightIndex,
+    novelMode: novelMode ?? this.novelMode,
   );
 
   Map<String, dynamic> toJson() => {
     'fontFamily': fontFamily,
     'fontSize': fontSize,
     'weightIndex': weightIndex,
+    'novelMode': novelMode,
   };
 
   factory WritingTypography.fromJson(Map<String, dynamic> json) {
@@ -133,6 +213,7 @@ class WritingTypography {
       fontFamily: json['fontFamily'] as String?,
       fontSize: size.clamp(minSize, maxSize),
       weightIndex: ((json['weightIndex'] as num?)?.toInt() ?? 1).clamp(0, 3),
+      novelMode: json['novelMode'] as bool? ?? false,
     );
   }
 }

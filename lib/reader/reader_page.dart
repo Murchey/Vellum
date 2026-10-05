@@ -1634,6 +1634,9 @@ class ReaderPageState extends State<ReaderPage>
         !_slideBusy) {
       _updateDragTurn(dx);
     }
+    // Bookmark pull is vertical; a turn drag must not also rebuild the page
+    // for a meaningless `_pullDownDistance` tick (that was drag stutter).
+    if (_dragTurn || _bookmarkPullInProgress) return;
     final next = dy > 0 ? dy : 0.0;
     if ((next - _pullDownDistance).abs() > 0.5) {
       setState(() => _pullDownDistance = next);
@@ -1659,6 +1662,11 @@ class ReaderPageState extends State<ReaderPage>
   /// Begin/update a finger-driven page turn. Progress maps 1:1 to drag
   /// distance so the overlay follows the hand instead of playing a canned
   /// animation only after release.
+  ///
+  /// Updates write straight into [_coverAnim] (the overlay's listenable) and
+  /// skip the page-level [setState]: a full rebuild per pointer-move is what
+  /// made the turn stutter mid-drag. Only the start/reverse paths need a
+  /// rebuild, to mount or retarget the overlay.
   void _updateDragTurn(double dx) {
     const intent = 10.0;
     if (!_dragTurn) {
@@ -1683,6 +1691,7 @@ class ReaderPageState extends State<ReaderPage>
       _coverFromPage = from;
       _coverToPage = to;
       _requestedPage = to;
+      _coverAnim.value = 0;
       setState(() {});
       return;
     }
@@ -1706,6 +1715,7 @@ class ReaderPageState extends State<ReaderPage>
       _requestedPage = to;
       travel = -travel;
       _dragLastTravel = travel;
+      setState(() {});
     }
     final p = (travel / span).clamp(0.0, 1.0);
     final now = DateTime.now().microsecondsSinceEpoch;
@@ -1715,8 +1725,12 @@ class ReaderPageState extends State<ReaderPage>
     }
     _dragLastTravel = travel;
     _dragLastMicros = now;
-    if ((p - _dragProgress).abs() < 0.002) return;
-    setState(() => _dragProgress = p);
+    _dragProgress = p;
+    // The overlay listens to [_coverAnim]; assigning value notifies it and
+    // repaints just the turn layer, not the whole reader page.
+    if (_coverAnim.value != p) {
+      _coverAnim.value = p;
+    }
   }
 
   void _cancelDragTurn() {
@@ -2033,8 +2047,11 @@ class ReaderPageState extends State<ReaderPage>
                       _pageBeforePointerDown = _currentPage;
                       _pointerLooksLikeSelection = false;
                       _selectionHoldTimer?.cancel();
+                      // 400 ms was short enough that a careful page-turn press
+                      // often armed selection first; hold longer before the
+                      // gesture is treated as a select.
                       _selectionHoldTimer = Timer(
-                        const Duration(milliseconds: 400),
+                        const Duration(milliseconds: 750),
                         () {
                           _pointerLooksLikeSelection = true;
                         },
@@ -2671,10 +2688,12 @@ class ReaderPageState extends State<ReaderPage>
                     ),
                   ),
                   builder: (context, child) {
-                    // While the finger is down (and after a committed drag)
-                    // progress is raw travel — linear = 跟手. Timed taps ease.
+                    // Finger-down (and the settle after a committed drag) is
+                    // raw travel on [_coverAnim.value] — linear = 跟手. Timed
+                    // taps ease. Drag writes the value directly, so this
+                    // builder is what repaints each pointer-move.
                     final progress = (_dragTurn || _dragCommitted)
-                        ? (_dragTurn ? _dragProgress : _coverAnim.value)
+                        ? _coverAnim.value
                         : Curves.easeOutCubic.transform(_coverAnim.value);
                     // Next: current slides out to the left (dx 0→-1).
                     // Prev: previous slides in from the left (dx -1→0).

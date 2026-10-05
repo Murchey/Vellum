@@ -9,6 +9,7 @@ void main() {
       expect(t.fontSize, 16);
       expect(t.fontFamily, isNull);
       expect(t.weightIndex, 1);
+      expect(t.novelMode, isFalse);
       expect(t.fontWeight, FontWeight.w400);
     });
 
@@ -17,17 +18,28 @@ void main() {
         fontFamily: 'serif',
         fontSize: 22,
         weightIndex: 3,
+        novelMode: true,
       );
       final r = WritingTypography.fromJson(t.toJson());
       expect(r.fontFamily, 'serif');
       expect(r.fontSize, 22);
       expect(r.weightIndex, 3);
+      expect(r.novelMode, isTrue);
       expect(r.fontWeight, FontWeight.w700);
     });
 
     test('clearFont resets to system default', () {
       const t = WritingTypography(fontFamily: 'monospace');
       expect(t.copyWith(clearFont: true).fontFamily, isNull);
+    });
+
+    test('novelMode toggles independently of font', () {
+      const t = WritingTypography(fontFamily: 'serif');
+      final on = t.copyWith(novelMode: true);
+      expect(on.novelMode, isTrue);
+      expect(on.fontFamily, 'serif');
+      final off = on.copyWith(novelMode: false);
+      expect(off.novelMode, isFalse);
     });
 
     test('out-of-range values clamp', () {

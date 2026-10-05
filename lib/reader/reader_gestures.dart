@@ -78,8 +78,9 @@ abstract final class ReaderGestures {
           ? ReaderTapAction.nextPage
           : ReaderTapAction.previousPage;
     }
-    // A long-press drag is selection, not a tap action.
-    if (elapsed >= const Duration(milliseconds: 450) || delta.distance > 12) {
+    // A long-press drag is selection, not a tap action. Matches the reader's
+    // selection-hold timer so a careful press-and-drag still turns the page.
+    if (elapsed >= const Duration(milliseconds: 750) || delta.distance > 12) {
       return ReaderTapAction.none;
     }
     if (!isIdle) return ReaderTapAction.none;
