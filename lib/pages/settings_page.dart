@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../services/book_library.dart';
 
@@ -102,6 +103,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _checkingUpdate = false;
   bool _autoCheckUpdate = true;
   String _updateRepo = '';
+  String _appVersion = '';
   final _library = const BookLibrary();
   final _statsService = const ReadingStatsService();
   ReadingStats _readingStats = const ReadingStats();
@@ -114,6 +116,17 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadUpdatePreferences();
     _loadReadingStats();
     _loadOrphanCount();
+    _loadAppVersion();
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() => _appVersion = info.version);
+    } catch (_) {
+      // Emulator / test without platform channels: leave the label empty.
+    }
   }
 
   Future<void> _loadUpdatePreferences() async {
@@ -634,6 +647,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 header: const Text('软件更新'),
 
                 children: [
+                  CupertinoListTile(
+                    backgroundColor: pageBackground,
+                    leading: const Icon(CupertinoIcons.info_circle),
+                    title: const Text('当前版本'),
+                    additionalInfo: Text(
+                      _appVersion.isEmpty ? '—' : 'V$_appVersion',
+                    ),
+                    onTap: null,
+                  ),
                   CupertinoListTile(
                     backgroundColor: pageBackground,
 
