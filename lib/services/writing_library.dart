@@ -107,6 +107,21 @@ String applyNovelFormatting(
   return joined;
 }
 
+/// True only when the writer **just pressed Enter at the end**.
+///
+/// Backspace that leaves a trailing newline (deleting the indent of an open
+/// paragraph, or walking back into the previous line) must return false —
+/// otherwise the Enter helper re-inserts `　　` and the caret can never leave
+/// the new paragraph. Same for any other shrinkage or mid-document edit.
+bool shouldOpenNovelParagraph(String previous, String next) {
+  if (next == previous) return false;
+  // Deletion / replace: never re-open.
+  if (next.length <= previous.length) return false;
+  // Must be a pure append at the end (Enter, or typing after it).
+  if (!next.startsWith(previous)) return false;
+  return next.endsWith('\n');
+}
+
 /// Result of inserting a novel-mode paragraph break at the caret.
 class NovelParagraphEdit {
   const NovelParagraphEdit({required this.text, required this.caretOffset});

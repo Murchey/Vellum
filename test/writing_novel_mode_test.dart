@@ -96,4 +96,46 @@ void main() {
       expect(out, '　　第一段。\n\n　　');
     });
   });
+
+  group('shouldOpenNovelParagraph (Enter vs backspace)', () {
+    test('Enter at the end opens a paragraph', () {
+      expect(
+        shouldOpenNovelParagraph('　　第一段。', '　　第一段。\n'),
+        isTrue,
+      );
+    });
+
+    test('backspace off the open indent does not re-open the paragraph', () {
+      // Deleting `　　` leaves a trailing `\n\n`; the old handler put the
+      // indent back and trapped the caret on the new line.
+      expect(
+        shouldOpenNovelParagraph('　　第一段。\n\n　　', '　　第一段。\n\n'),
+        isFalse,
+      );
+      expect(
+        shouldOpenNovelParagraph('　　第一段。\n\n　', '　　第一段。\n\n'),
+        isFalse,
+      );
+    });
+
+    test('backspace onto the previous line does not re-open', () {
+      // Walking back through the paragraph gap to the end of the last line.
+      expect(
+        shouldOpenNovelParagraph('　　第一段。\n\n', '　　第一段。\n'),
+        isFalse,
+      );
+      expect(
+        shouldOpenNovelParagraph('　　第一段。\n', '　　第一段。'),
+        isFalse,
+      );
+    });
+
+    test('mid-document edits are ignored', () {
+      expect(
+        shouldOpenNovelParagraph('甲\n乙', '甲\n丙\n乙'),
+        isFalse,
+      );
+      expect(shouldOpenNovelParagraph('abc', 'abc'), isFalse);
+    });
+  });
 }

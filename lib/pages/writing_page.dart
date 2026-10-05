@@ -434,6 +434,10 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
   /// Deliberately a tiny rewrite of the tail only. The old live formatter
   /// rewrote the whole document on a timer, which ate the caret's newline and
   /// broke IME composition — that is what made 换行 feel broken.
+  ///
+  /// Backspace is explicitly excluded ([shouldOpenNovelParagraph]): deleting
+  /// the indent of an open paragraph used to fall through here and get the
+  /// `　　` put right back, so the caret could never return to the previous line.
   void _maybeOpenNovelParagraph() {
     final text = _bodyController.text;
     final sel = _bodyController.selection;
@@ -441,9 +445,7 @@ class _WritingEditorPageState extends State<WritingEditorPage> {
     // Never rewrite under an active IME composition.
     if (_bodyController.value.composing.isValid) return;
     if (sel.extentOffset != text.length) return;
-    if (text == _lastBodyText) return;
-    // Only react when a newline was just added at the end.
-    if (!text.endsWith('\n')) return;
+    if (!shouldOpenNovelParagraph(_lastBodyText, text)) return;
     if (text.endsWith('\n\n　　')) return;
 
     final edit = novelParagraphBreakWithCaret(text);
