@@ -41,8 +41,7 @@ class ReaderDirectoryPanel extends StatefulWidget {
   /// least as tall as [minPanelHeight], because a sheet shorter than its own
   /// header is exactly what overflows — and the soft keyboard is what makes a
   /// sheet that short.
-  static double get headerHeight =>
-      _bookTitleHeight + _tabRowHeight + 0.5;
+  static double get headerHeight => _bookTitleHeight + _tabRowHeight + 0.5;
 
   /// Header height the panel falls back to when the sheet is too short for the
   /// book-name line: a compact app bar, one row of tabs, their rule, and a small
@@ -453,12 +452,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
         // screen. One layout for the whole search session also avoids swapping
         // headers mid-keyboard-animation (which drops the input connection).
         if (_searching) {
-          return _searchLayout(
-            context,
-            ink: ink,
-            muted: muted,
-            accent: accent,
-          );
+          return _searchLayout(context, ink: ink, muted: muted, accent: accent);
         }
         if (constraints.maxHeight < headerHeight) {
           return _compactLayout(
@@ -567,7 +561,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
                 const SizedBox(width: 8),
                 CupertinoButton(
                   padding: EdgeInsets.zero,
-                  minimumSize: const Size(40, 36),
+                  minimumSize: const Size(44, 44),
                   onPressed: widget.onClose,
                   child: Icon(CupertinoIcons.clear, size: 19, color: muted),
                 ),
@@ -594,7 +588,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
               if (!_searching && _canSearch)
                 CupertinoButton(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  minimumSize: const Size(40, 36),
+                  minimumSize: const Size(44, 44),
                   onPressed: _openSearch,
                   child: Icon(CupertinoIcons.search, size: 18, color: accent),
                 ),
@@ -635,8 +629,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
   ///
   /// Part of the panel's contract: [ReaderMenu] keeps the sheet at least this
   /// tall, because a sheet shorter than its own header is what overflows.
-  static double get headerHeight =>
-      _bookTitleHeight + _tabRowHeight + 0.5;
+  static double get headerHeight => _bookTitleHeight + _tabRowHeight + 0.5;
 
   static const double _bookTitleHeight = 14 + 17 + 8;
   static const double _tabRowHeight = 44;
@@ -1039,7 +1032,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
           ),
           CupertinoButton(
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            minimumSize: const Size(36, 32),
+            minimumSize: const Size(44, 44),
             onPressed: activeIndex <= 0 ? null : () => _stepHit(-1),
             child: Icon(
               CupertinoIcons.chevron_up,
@@ -1049,7 +1042,7 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
           ),
           CupertinoButton(
             padding: const EdgeInsets.symmetric(horizontal: 6),
-            minimumSize: const Size(36, 32),
+            minimumSize: const Size(44, 44),
             onPressed: activeIndex >= hits.length - 1
                 ? null
                 : () => _stepHit(1),
@@ -1251,61 +1244,143 @@ class _ReaderDirectoryPanelState extends State<ReaderDirectoryPanel> {
     final surface = widget.surface ?? VellumTheme.readerChromeOf(context);
     final ink = VellumTheme.readerChromeInk(surface);
     final muted = ink.withValues(alpha: .55);
+    final accent = VellumTheme.readerAccentOf(context);
     if (notes.isEmpty) {
       return Center(
-        child: Text(
-          '选中正文后可以划线或写笔记。',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: muted),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(CupertinoIcons.text_badge_plus, size: 30, color: muted),
+              const SizedBox(height: 10),
+              Text(
+                '选中正文后可以划线或写笔记。',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: muted, height: 1.35),
+              ),
+            ],
+          ),
         ),
       );
     }
     return Scrollbar(
       thumbVisibility: true,
       child: ListView.builder(
-        padding: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
         itemCount: notes.length,
         itemBuilder: (context, index) {
           final note = notes[index];
           // Imported notes whose book was never identified are tagged, and this
           // list is where the reader meets them for the current book.
           final orphaned = note.bookId == unmatchedBookId;
-          return CupertinoListTile(
-            backgroundColor: surface,
-            backgroundColorActivated: ink.withValues(alpha: .08),
-            title: Text(
-              note.selectedText.isEmpty ? note.note : note.selectedText,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: ink,
-                backgroundColor: VellumTheme.readerAccentOf(
-                  context,
-                ).withValues(alpha: .18),
+          final quote = note.selectedText.trim();
+          final comment = note.note.trim();
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: ink.withValues(alpha: .035),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: ink.withValues(alpha: .08)),
+              ),
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => widget.onJumpToParagraph(note.paragraphIndex),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: accent.withValues(alpha: .12),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              note.kind.label,
+                              style: TextStyle(
+                                color: accent,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              [
+                                '第 ${note.paragraphIndex + 1} 段',
+                                if (orphaned) '$unmatchedBookTitle · 可重新关联',
+                              ].join(' · '),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: muted, fontSize: 12),
+                            ),
+                          ),
+                          Semantics(
+                            button: true,
+                            label: '删除笔记',
+                            child: CupertinoButton(
+                              padding: EdgeInsets.zero,
+                              minimumSize: const Size(44, 44),
+                              onPressed: () async {
+                                await widget.onRemoveNote(note.id);
+                                if (mounted) setState(() {});
+                              },
+                              child: Icon(
+                                CupertinoIcons.delete,
+                                size: 17,
+                                color: muted,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (quote.isNotEmpty) ...[
+                        const SizedBox(height: 9),
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                          decoration: BoxDecoration(
+                            color: accent.withValues(alpha: .08),
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: Text(
+                            quote,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: ink,
+                              fontSize: 14,
+                              height: 1.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (comment.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          comment,
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: ink.withValues(alpha: .82),
+                            fontSize: 13,
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
-            subtitle: Text(
-              [
-                note.note.trim().isEmpty || note.selectedText.isEmpty
-                    ? note.kind.label
-                    : note.note.trim(),
-                '第 ${note.paragraphIndex + 1} 段',
-                if (orphaned) '$unmatchedBookTitle · 可重新关联',
-              ].join(' · '),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: muted),
-            ),
-            trailing: CupertinoButton(
-              padding: EdgeInsets.zero,
-              minimumSize: const Size(44, 44),
-              onPressed: () async {
-                await widget.onRemoveNote(note.id);
-                if (mounted) setState(() {});
-              },
-              child: Icon(CupertinoIcons.delete, size: 17, color: muted),
-            ),
-            onTap: () => widget.onJumpToParagraph(note.paragraphIndex),
           );
         },
       ),
@@ -1444,13 +1519,30 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
   bool _showInkPicker = false;
   bool _showUnderlayPicker = false;
 
+  /// A sub-page should always start at its title. Preserving the previous
+  /// scroll offset could leave the new title outside the viewport, so the
+  /// back icon painted but its hit target was clipped by the scroll view.
+  final ScrollController _scrollController = ScrollController();
+
   static const double _followSystemBrightness = -1;
 
   bool get _followsSystem => widget.brightness < 0;
 
   @override
   void dispose() {
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _resetSubpageScroll() {
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
+  }
+
+  void _setSubpage(VoidCallback change) {
+    setState(change);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _resetSubpageScroll();
+    });
   }
 
   Color get _surface => widget.surface ?? VellumTheme.readerChromeOf(context);
@@ -1464,6 +1556,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       curve: Curves.easeOutCubic,
       alignment: Alignment.topCenter,
       child: SingleChildScrollView(
+        controller: _scrollController,
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1493,7 +1586,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       title: '自定义背景',
       surface: _surface,
       onClose: widget.onClose,
-      onBack: () => setState(() {
+      onBack: () => _setSubpage(() {
         _showInkPicker = false;
         _showUnderlayPicker = false;
         _showBackground = false;
@@ -1570,7 +1663,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           CupertinoButton(
             padding: const EdgeInsets.symmetric(horizontal: 10),
             minimumSize: const Size(0, 34),
-            onPressed: () => setState(() {
+            onPressed: () => _setSubpage(() {
               _showInkPicker = false;
               _showUnderlayPicker = !_showUnderlayPicker;
             }),
@@ -1647,7 +1740,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 10),
           minimumSize: const Size(0, 34),
-          onPressed: () => setState(() {
+          onPressed: () => _setSubpage(() {
             _showUnderlayPicker = false;
             _showInkPicker = !_showInkPicker;
           }),
@@ -1792,7 +1885,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     final accent = VellumTheme.readerAccentOf(context);
     final surface = _surface;
     return Container(
-      height: 36,
+      height: 44,
       padding: const EdgeInsets.all(2),
       decoration: BoxDecoration(
         color: ink.withValues(alpha: .08),
@@ -1907,7 +2000,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
           CupertinoButton(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             minimumSize: const Size(0, 36),
-            onPressed: () => setState(() {
+            onPressed: () => _setSubpage(() {
               _showMore = false;
               _showInkPicker = false;
               _showUnderlayPicker = false;
@@ -1958,7 +2051,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
     ),
     GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => setState(() => _showMore = true),
+      onTap: () => _setSubpage(() => _showMore = true),
       child: ReaderSettingRow(
         label: '更多',
         surface: _surface,
@@ -1980,7 +2073,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       title: '更多设置',
       surface: _surface,
       onClose: widget.onClose,
-      onBack: () => setState(() => _showMore = false),
+      onBack: () => _setSubpage(() => _showMore = false),
     ),
     ReaderSettingRow(
       label: '字重',
@@ -2016,7 +2109,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       children: [
         CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          minimumSize: const Size(36, 36),
+          minimumSize: const Size(44, 44),
           onPressed: () => widget.onFontSize(
             (widget.fontSize - 1).clamp(kReaderFontMin, kReaderFontMax),
           ),
@@ -2032,7 +2125,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
         ),
         CupertinoButton(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          minimumSize: const Size(36, 36),
+          minimumSize: const Size(44, 44),
           onPressed: () => widget.onFontSize(
             (widget.fontSize + 1).clamp(kReaderFontMin, kReaderFontMax),
           ),
@@ -2063,7 +2156,7 @@ class _ReaderSettingsPanelState extends State<ReaderSettingsPanel> {
       ),
       CupertinoButton(
         padding: const EdgeInsets.symmetric(horizontal: 4),
-        minimumSize: const Size(0, 36),
+        minimumSize: const Size(44, 44),
         onPressed: () => widget.onBrightness(_followSystemBrightness),
         child: Text(
           _followsSystem ? '跟随系统' : '恢复跟随',
@@ -2126,7 +2219,8 @@ class ReaderPanelTitle extends StatelessWidget {
           if (onBack != null)
             CupertinoButton(
               padding: EdgeInsets.zero,
-              minimumSize: const Size(40, 36),
+              minimumSize: const Size(44, 44),
+              pressedOpacity: .65,
               onPressed: onBack,
               child: Icon(CupertinoIcons.chevron_back, size: 20, color: muted),
             )
@@ -2144,7 +2238,8 @@ class ReaderPanelTitle extends StatelessWidget {
           const Spacer(),
           CupertinoButton(
             padding: EdgeInsets.zero,
-            minimumSize: const Size(44, 36),
+            minimumSize: const Size(44, 44),
+            pressedOpacity: .65,
             onPressed: onClose,
             child: Icon(CupertinoIcons.chevron_down, size: 20, color: muted),
           ),
@@ -2172,9 +2267,10 @@ class ReaderSettingRow extends StatelessWidget {
     final muted = VellumTheme.readerChromeInk(bg).withValues(alpha: .55);
     return Padding(
       padding: const EdgeInsets.only(left: 16, right: 16, bottom: 12),
-      child: SizedBox(
-        height: 36,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 44),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SizedBox(
               width: 56,

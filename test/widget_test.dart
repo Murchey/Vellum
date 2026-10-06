@@ -80,10 +80,12 @@ void main() {
       VellumTheme.readerInkFor(VellumTheme.readerWhite),
       VellumTheme.readerBodyInk,
     );
-    // Fanqie brand orange lives on the reader only.
+    // Keep the extracted Fanqie accent as a reference token.
     expect(VellumTheme.readerAccent, const Color(0xfffa6725));
-    // App shell keeps quiet wine so nav bars stay familiar.
-    expect(VellumTheme.accent, const Color(0xffa33d2e));
+    // Reader controls and the app shell share the VELLUM terracotta accent;
+    // independently selectable for reading comfort.
+    expect(VellumTheme.accent, const Color(0xffa95c46));
+    expect(VellumTheme.darkAccent, const Color(0xffd8896c));
   });
 
   test('legacy reader papers migrate to the standard Fanqie palette', () {

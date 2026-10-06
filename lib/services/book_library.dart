@@ -183,6 +183,12 @@ ImportedBook _decodeBookContent(Map<String, dynamic> data) {
   );
 }
 
+/// JSON decoding is CPU-heavy for large novels. Keep it off the UI isolate so
+/// the reader can present its chrome and loading state while the body is being
+/// materialized.
+ImportedBook _decodeBookContentJson(String raw) =>
+    _decodeBookContent(jsonDecode(raw) as Map<String, dynamic>);
+
 class BookLibrary {
   const BookLibrary({this.fonts = const FontStorage()});
 
@@ -288,9 +294,8 @@ class BookLibrary {
     final file = await _bookContentFile(book.storageId);
     if (await file.exists()) {
       try {
-        final data =
-            jsonDecode(await file.readAsString()) as Map<String, dynamic>;
-        final full = _decodeBookContent(data);
+        final raw = await file.readAsString();
+        final full = await compute(_decodeBookContentJson, raw);
         // Content files do not carry shelf cover; keep the index shell's cover.
         return full.copyWith(
           coverBytes: book.coverBytes,

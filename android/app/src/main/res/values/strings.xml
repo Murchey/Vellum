@@ -1,0 +1,5 @@
+<resources>
+    <string name="widget_continue_name">VELLUM 继续阅读</string>
+    <string name="widget_continue_title">继续阅读</string>
+    <string name="widget_continue_subtitle">打开 VELLUM，回到上次阅读位置</string>
+</resources>

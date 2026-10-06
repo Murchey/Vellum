@@ -11,7 +11,7 @@ const _font = InstalledFont(
 );
 
 /// `activeFamily` deliberately matches no row so ink assertions read the
-/// unselected style rather than the orange selected style.
+/// unselected style rather than the selected terracotta style.
 const _unselectedFamily = 'Font_absent';
 
 void main() {
@@ -99,6 +99,63 @@ void main() {
     final preview = tester.widget<Text>(find.text('永'));
     expect(preview.style!.fontFamily, _font.family);
     expect(preview.style!.color, ink.withValues(alpha: .55));
+  });
+
+  testWidgets(
+    'selected font has terracotta fill, border, label and checkmark',
+    (tester) async {
+      await tester.pumpWidget(
+        CupertinoApp(
+          theme: VellumTheme.light,
+          home: CupertinoPageScaffold(
+            child: ReaderFontPickerSheet(
+              surface: VellumTheme.readerWhite,
+              installedFonts: const [],
+              activeFamily: 'Georgia',
+              onSelectSystemFont: _noop,
+              onSelectImportedFont: _noopFont,
+            ),
+          ),
+        ),
+      );
+
+      final label = tester.widget<Text>(find.text('系统字体'));
+      expect(label.style!.color, VellumTheme.accent);
+      expect(find.byIcon(CupertinoIcons.checkmark_alt), findsOneWidget);
+      final row = tester.widget<Container>(
+        find
+            .ancestor(of: find.text('系统字体'), matching: find.byType(Container))
+            .first,
+      );
+      final decoration = row.decoration! as BoxDecoration;
+      expect(decoration.border, isNotNull);
+      expect(decoration.color, VellumTheme.accent.withValues(alpha: .13));
+    },
+  );
+
+  testWidgets('dark reader paper keeps selected state high contrast', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      CupertinoApp(
+        theme: VellumTheme.dark,
+        home: CupertinoPageScaffold(
+          child: ReaderFontPickerSheet(
+            surface: VellumTheme.readerNight,
+            installedFonts: const [],
+            activeFamily: 'Georgia',
+            onSelectSystemFont: _noop,
+            onSelectImportedFont: _noopFont,
+          ),
+        ),
+      ),
+    );
+
+    expect(
+      tester.widget<Text>(find.text('系统字体')).style!.color,
+      VellumTheme.darkAccent,
+    );
+    expect(find.byIcon(CupertinoIcons.checkmark_alt), findsOneWidget);
   });
 }
 

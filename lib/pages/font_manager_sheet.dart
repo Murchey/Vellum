@@ -33,13 +33,19 @@ class FontManagerSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ink = VellumTheme.inkOf(context);
+    final muted = VellumTheme.mutedOf(context);
+    final accent = VellumTheme.accentOf(context);
+    final surface = VellumTheme.shellOf(context);
+    final card = VellumTheme.cardOf(context);
+    final line = VellumTheme.lineOf(context);
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * 0.7,
       ),
 
       decoration: BoxDecoration(
-        color: CupertinoTheme.of(context).scaffoldBackgroundColor,
+        color: surface,
 
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -53,16 +59,21 @@ class FontManagerSheet extends StatelessWidget {
 
             child: Row(
               children: [
-                const Text(
+                Text(
                   '字体管理',
 
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: ink,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
 
                 const Spacer(),
 
                 CupertinoButton(
-                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(44, 44),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
 
                   onPressed: () {
                     Navigator.pop(context);
@@ -70,13 +81,13 @@ class FontManagerSheet extends StatelessWidget {
                     onImportFonts();
                   },
 
-                  child: const Icon(CupertinoIcons.plus_circle),
+                  child: Icon(CupertinoIcons.plus_circle, color: accent),
                 ),
               ],
             ),
           ),
 
-          Container(height: 1, color: VellumTheme.lineOf(context)),
+          Container(height: 1, color: line),
 
           Flexible(
             child: installedFonts.isEmpty
@@ -85,24 +96,14 @@ class FontManagerSheet extends StatelessWidget {
 
                     child: Column(
                       children: [
-                        Icon(
-                          CupertinoIcons.textformat,
-
-                          size: 48,
-
-                          color: VellumTheme.mutedOf(context),
-                        ),
+                        Icon(CupertinoIcons.textformat, size: 48, color: muted),
 
                         const SizedBox(height: 16),
 
                         Text(
                           '暂无字体',
 
-                          style: TextStyle(
-                            fontSize: 16,
-
-                            color: VellumTheme.mutedOf(context),
-                          ),
+                          style: TextStyle(fontSize: 16, color: muted),
                         ),
 
                         const SizedBox(height: 8),
@@ -110,11 +111,7 @@ class FontManagerSheet extends StatelessWidget {
                         Text(
                           '点击右上角 + 导入字体',
 
-                          style: TextStyle(
-                            fontSize: 14,
-
-                            color: VellumTheme.mutedOf(context),
-                          ),
+                          style: TextStyle(fontSize: 14, color: muted),
                         ),
                       ],
                     ),
@@ -153,11 +150,12 @@ class FontManagerSheet extends StatelessWidget {
               padding: const EdgeInsets.all(16),
 
               child: CupertinoButton(
-                color: VellumTheme.cardOf(context),
+                minimumSize: const Size(44, 44),
+                color: card,
 
                 onPressed: () => Navigator.pop(context),
 
-                child: const Text('关闭'),
+                child: Text('关闭', style: TextStyle(color: ink)),
               ),
             ),
           ),
@@ -171,15 +169,24 @@ class FontManagerSheet extends StatelessWidget {
       context: context,
 
       builder: (ctx) => CupertinoAlertDialog(
-        title: const Text('删除字体'),
+        title: Text(
+          '删除字体',
+          style: TextStyle(color: VellumTheme.inkOf(context)),
+        ),
 
-        content: Text('确定要删除 "$fontName" 吗？'),
+        content: Text(
+          '确定要删除 "$fontName" 吗？',
+          style: TextStyle(color: VellumTheme.mutedOf(context)),
+        ),
 
         actions: [
           CupertinoDialogAction(
             onPressed: () => Navigator.pop(ctx, false),
 
-            child: const Text('取消'),
+            child: Text(
+              '取消',
+              style: TextStyle(color: VellumTheme.accentOf(context)),
+            ),
           ),
 
           CupertinoDialogAction(
@@ -231,8 +238,8 @@ class _FontCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
 
         border: isActive
-            ? Border.all(color: VellumTheme.accentOf(context), width: 2)
-            : null,
+            ? Border.all(color: VellumTheme.accentOf(context), width: 1.5)
+            : Border.all(color: VellumTheme.lineOf(context)),
       ),
 
       child: Column(
@@ -244,14 +251,14 @@ class _FontCard extends StatelessWidget {
             padding: const EdgeInsets.all(20),
 
             decoration: BoxDecoration(
-              color: VellumTheme.cardOf(context),
+              color: VellumTheme.cardOf(context).withValues(alpha: .72),
 
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(12),
               ),
             ),
 
-            child: FontPreview(font: font),
+            child: FontPreview(font: font, ink: VellumTheme.inkOf(context)),
           ),
 
           // 操作区
@@ -268,7 +275,8 @@ class _FontCard extends StatelessWidget {
                       Text(
                         font.label,
 
-                        style: const TextStyle(
+                        style: TextStyle(
+                          color: VellumTheme.inkOf(context),
                           fontSize: 16,
 
                           fontWeight: FontWeight.w600,
@@ -291,22 +299,27 @@ class _FontCard extends StatelessWidget {
 
                 if (!isActive)
                   CupertinoButton(
+                    minimumSize: const Size(44, 44),
                     padding: const EdgeInsets.symmetric(horizontal: 12),
 
                     onPressed: onActivate,
 
-                    child: const Text('启用'),
+                    child: Text(
+                      '启用',
+                      style: TextStyle(color: VellumTheme.accentOf(context)),
+                    ),
                   ),
 
                 CupertinoButton(
+                  minimumSize: const Size(44, 44),
                   padding: const EdgeInsets.symmetric(horizontal: 12),
 
                   onPressed: onDelete,
 
-                  child: const Icon(
+                  child: Icon(
                     CupertinoIcons.trash,
 
-                    color: CupertinoColors.systemRed,
+                    color: CupertinoColors.systemRed.resolveFrom(context),
 
                     size: 20,
                   ),

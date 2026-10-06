@@ -1,23 +1,28 @@
 import 'package:flutter/cupertino.dart';
 
-/// Quiet paper/ink palette for Vellum.
+/// Semantic palette for Vellum.
 ///
-/// App shell stays warm paper; reader papers/brand follow Fanqie
-/// `colors.xml` (`reader_*_theme_bg_light`, `skin_color_orange_brand_*`).
+/// VELLUM's shell uses a warm vellum/terracotta palette. Reader papers remain
+/// independent Fanqie-compatible surfaces so reading comfort is not coupled to
+/// the application's brand theme.
 abstract final class VellumTheme {
   static String fontFamily = 'Georgia';
   static String contentFontFamily = 'Georgia';
 
-  // Fanqie brand orange — reader chrome / current chapter / seek only.
+  // Fanqie reference accent. It remains available for comparing the extracted
+  // palette, but VELLUM controls use the shared shell accent below so the
+  // reader and library feel like one product.
   static const readerAccent = Color(0xfffa6725);
   static const readerAccentDark = Color(0xffffa177);
 
-  // App shell accent (nav bars, library actions) — Vellum quiet wine.
-  // Kept separate so Fanqie orange does not repaint the whole app nav.
-  static const accent = Color(0xffa33d2e);
-  static const darkAccent = Color(0xffd97757);
+  // Shared app-shell accent (nav bars, library actions and reader controls).
+  // Terracotta keeps the paper-inspired identity legible in both themes.
+  static const accent = Color(0xffa95c46);
+  static const darkAccent = Color(0xffd8896c);
 
   // App shell (library / settings).
+  // `paper` is retained as the legacy reading underlay used by older saved
+  // states; the shell uses the warm semantic surfaces below.
   static const paper = Color(0xfff7e4cf);
   static const card = Color(0xfffff8ef);
   static const ink = Color(0xff2a211b);
@@ -28,6 +33,17 @@ abstract final class VellumTheme {
   static const darkInk = Color(0xfff0ebe1);
   static const darkMuted = Color(0xffa8a29e);
   static const darkLine = Color(0xff3a3530);
+
+  static const shellPaper = Color(0xfff7f3ed);
+  static const shellCard = Color(0xfffffdf8);
+  static const shellInk = Color(0xff2b2723);
+  static const shellMuted = Color(0xff756c65);
+  static const shellLine = Color(0xffe4dcd3);
+  static const shellDarkPaper = Color(0xff151311);
+  static const shellDarkCard = Color(0xff211e1a);
+  static const shellDarkInk = Color(0xfff5efe7);
+  static const shellDarkMuted = Color(0xffb6aaa0);
+  static const shellDarkLine = Color(0xff443a33);
 
   // Fanqie STANDARD reader resources (ReaderBgColorType.STANDARD). The
   // similarly named `*_theme_bg_light` resources are brightness variants,
@@ -50,21 +66,25 @@ abstract final class VellumTheme {
   static const light = CupertinoThemeData(
     brightness: Brightness.light,
     primaryColor: accent,
-    scaffoldBackgroundColor: paper,
-    barBackgroundColor: paper,
+    scaffoldBackgroundColor: shellPaper,
+    barBackgroundColor: shellPaper,
     applyThemeToAll: true,
     textTheme: CupertinoTextThemeData(
-      textStyle: TextStyle(inherit: false, color: ink, fontFamily: 'Georgia'),
+      textStyle: TextStyle(
+        inherit: false,
+        color: shellInk,
+        fontFamily: 'Georgia',
+      ),
       navTitleTextStyle: TextStyle(
         inherit: false,
-        color: ink,
+        color: shellInk,
         fontSize: 17,
         fontWeight: FontWeight.w600,
         fontFamily: 'Georgia',
       ),
       navLargeTitleTextStyle: TextStyle(
         inherit: false,
-        color: ink,
+        color: shellInk,
         fontSize: 34,
         fontWeight: FontWeight.w700,
         fontFamily: 'Georgia',
@@ -75,25 +95,25 @@ abstract final class VellumTheme {
   static const dark = CupertinoThemeData(
     brightness: Brightness.dark,
     primaryColor: darkAccent,
-    scaffoldBackgroundColor: darkPaper,
-    barBackgroundColor: darkPaper,
+    scaffoldBackgroundColor: shellDarkPaper,
+    barBackgroundColor: shellDarkPaper,
     applyThemeToAll: true,
     textTheme: CupertinoTextThemeData(
       textStyle: TextStyle(
         inherit: false,
-        color: darkInk,
+        color: shellDarkInk,
         fontFamily: 'Georgia',
       ),
       navTitleTextStyle: TextStyle(
         inherit: false,
-        color: darkInk,
+        color: shellDarkInk,
         fontSize: 17,
         fontWeight: FontWeight.w600,
         fontFamily: 'Georgia',
       ),
       navLargeTitleTextStyle: TextStyle(
         inherit: false,
-        color: darkInk,
+        color: shellDarkInk,
         fontSize: 34,
         fontWeight: FontWeight.w700,
         fontFamily: 'Georgia',
@@ -120,7 +140,9 @@ abstract final class VellumTheme {
   }
 
   static Color inkOf(BuildContext context) =>
-      CupertinoTheme.of(context).brightness == Brightness.dark ? darkInk : ink;
+      CupertinoTheme.of(context).brightness == Brightness.dark
+      ? shellDarkInk
+      : shellInk;
 
   /// Fanqie body ink on a reader paper (pure black on light, #B7B7B7 night).
   static Color readerInkFor(Color background) {
@@ -162,31 +184,32 @@ abstract final class VellumTheme {
   /// App-shell surface (nav bar / scaffold) — always matches the page paper.
   static Color shellOf(BuildContext context) =>
       CupertinoTheme.of(context).brightness == Brightness.dark
-      ? darkPaper
-      : paper;
+      ? shellDarkPaper
+      : shellPaper;
 
   static Color mutedOf(BuildContext context) =>
       CupertinoTheme.of(context).brightness == Brightness.dark
-      ? darkMuted
-      : muted;
+      ? shellDarkMuted
+      : shellMuted;
   static Color accentOf(BuildContext context) =>
       CupertinoTheme.of(context).brightness == Brightness.dark
       ? darkAccent
       : accent;
 
-  /// Fanqie brand orange for reader UI (independent of app shell accent).
-  static Color readerAccentOf(BuildContext context) =>
-      CupertinoTheme.of(context).brightness == Brightness.dark
-      ? readerAccentDark
-      : readerAccent;
+  /// Shared interactive accent for the reader and the application shell.
+  ///
+  /// The reading paper remains user-selectable (Fanqie's paper mechanism),
+  /// while selection, progress, bookmarks and settings use the same VELLUM
+  /// terracotta as the library and settings pages.
+  static Color readerAccentOf(BuildContext context) => accentOf(context);
   static Color lineOf(BuildContext context) =>
       CupertinoTheme.of(context).brightness == Brightness.dark
-      ? darkLine
-      : line;
+      ? shellDarkLine
+      : shellLine;
   static Color cardOf(BuildContext context) =>
       CupertinoTheme.of(context).brightness == Brightness.dark
-      ? darkCard
-      : card;
+      ? shellDarkCard
+      : shellCard;
 
   /// Reader chrome surface. Prefer the active reading paper (Fanqie menu
   /// sits on theme bg). Defaults to Fanqie white paper in light mode.

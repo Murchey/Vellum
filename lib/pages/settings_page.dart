@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -21,6 +21,7 @@ import 'unassociated_notes_sheet.dart';
 
 import 'ebook_to_txt_page.dart';
 import 'reading_stats_page.dart';
+import 'backup_settings_page.dart';
 import 'tts_settings_page.dart';
 import 'update_sheet.dart';
 
@@ -442,7 +443,10 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final pageBackground = CupertinoTheme.of(context).scaffoldBackgroundColor;
 
-    final pressedBackground = VellumTheme.cardOf(context);
+    final pressedBackground = VellumTheme.accentOf(
+      context,
+    ).withValues(alpha: .10);
+    final tileBackground = VellumTheme.cardOf(context);
 
     final hasActiveFont = widget.activeFontName.isNotEmpty;
 
@@ -470,7 +474,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 children: [
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -496,7 +500,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 children: [
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -510,7 +514,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
 
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -523,7 +527,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   if (hasActiveFont) ...[
                     CupertinoListTile(
-                      backgroundColor: pageBackground,
+                      backgroundColor: tileBackground,
 
                       backgroundColorActivated: pressedBackground,
 
@@ -550,7 +554,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 children: [
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -567,7 +571,19 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
+                    backgroundColorActivated: pressedBackground,
+                    leading: const Icon(CupertinoIcons.lock_shield),
+                    title: const Text('数据备份'),
+                    additionalInfo: _info(context, const Text('本地/云端')),
+                    onTap: () => Navigator.of(context).push(
+                      CupertinoPageRoute(
+                        builder: (_) => const BackupSettingsPage(),
+                      ),
+                    ),
+                  ),
+                  CupertinoListTile(
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -591,7 +607,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 header: const Text('阅读数据'),
                 children: [
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.chart_bar),
                     title: const Text('阅读统计'),
@@ -612,7 +628,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     },
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.doc_text),
                     title: const Text('导出阅读笔记'),
@@ -620,7 +636,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: _exportNotes,
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.tray_arrow_down),
                     title: const Text('导入阅读笔记'),
@@ -628,7 +644,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: _importNotes,
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.link),
                     title: const Text(unmatchedBookTitle),
@@ -648,7 +664,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
                 children: [
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     leading: const Icon(CupertinoIcons.info_circle),
                     title: const Text('当前版本'),
                     additionalInfo: Text(
@@ -657,7 +673,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: null,
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -672,7 +688,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: _checkingUpdate ? null : _checkForUpdate,
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.gear_alt),
                     title: const Text('更新仓库'),
@@ -680,7 +696,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: _editUpdateRepo,
                   ),
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
                     backgroundColorActivated: pressedBackground,
                     leading: const Icon(CupertinoIcons.arrow_2_circlepath),
                     title: const Text('启动时自动检查更新'),
@@ -704,7 +720,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     future: _usage,
 
                     builder: (context, snapshot) => CupertinoListTile(
-                      backgroundColor: pageBackground,
+                      backgroundColor: tileBackground,
 
                       backgroundColorActivated: pressedBackground,
 
@@ -721,7 +737,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
 
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -739,7 +755,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
 
                   CupertinoListTile(
-                    backgroundColor: pageBackground,
+                    backgroundColor: tileBackground,
 
                     backgroundColorActivated: pressedBackground,
 
@@ -782,3 +798,4 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 }
+

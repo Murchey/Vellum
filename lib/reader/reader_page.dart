@@ -2222,6 +2222,7 @@ class ReaderPageState extends State<ReaderPage>
                   chapterLabel: _chapterLabel,
                   surface: _backgroundFor(context),
                 ),
+              if (!_showControls) _readingTimePill(context),
               if (_listening && !_showControls)
                 TtsBar(
                   playing: ttsHandler?.isPlaying ?? false,
@@ -2502,6 +2503,68 @@ class ReaderPageState extends State<ReaderPage>
       color: _readerInk,
     ),
   );
+
+  /// A compact, always-visible cue makes the active timer discoverable while
+  /// keeping the reading page free of a permanent toolbar. The detail page
+  /// remains the place for trends and per-book totals.
+  Widget _readingTimePill(BuildContext context) {
+    final surface = _backgroundFor(context);
+    final ink = VellumTheme.readerChromeInk(surface);
+    final accent = VellumTheme.readerAccentOf(context);
+    return SafeArea(
+      bottom: false,
+      child: Align(
+        alignment: Alignment.topRight,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 4, right: 18),
+          child: ValueListenableBuilder<int>(
+            valueListenable: _sessionSeconds,
+            builder: (context, session, _) => ValueListenableBuilder<int>(
+              valueListenable: _todaySeconds,
+              builder: (context, today, _) => DecoratedBox(
+                decoration: BoxDecoration(
+                  color: surface.withValues(alpha: .72),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: ink.withValues(alpha: .12)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 4,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(CupertinoIcons.timer, size: 12, color: accent),
+                      const SizedBox(width: 4),
+                      Text(
+                        '本次 ${_compactDuration(session)} · 今日 ${_compactDuration(today)}',
+                        style: TextStyle(
+                          color: ink.withValues(alpha: .62),
+                          fontSize: 10,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _compactDuration(int seconds) {
+    final value = seconds < 0 ? 0 : seconds;
+    final hours = value ~/ 3600;
+    final minutes = (value % 3600) ~/ 60;
+    if (hours > 0) return '${hours}h${minutes.toString().padLeft(2, '0')}';
+    if (minutes > 0) return '${minutes}m';
+    return '${value}s';
+  }
+
   void _showFontPicker() {
     showCupertinoModalPopup<void>(
       context: context,

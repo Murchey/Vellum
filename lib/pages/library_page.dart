@@ -291,24 +291,44 @@ class _LibraryPageState extends State<LibraryPage> {
                         ),
                       ),
                     )
-                  : GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(14, 8, 14, 28),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 16,
-                            childAspectRatio: .55,
-                          ),
-                      itemCount: filtered.length,
-                      itemBuilder: (context, index) {
-                        final book = filtered[index];
-                        return BookGridCard(
-                          book: book,
-                          progress: widget.progressById[book.storageId] ?? 0,
-                          onTap: () => widget.onOpen(book),
-                          onDelete: () => widget.onDelete(book),
-                          onLongPress: () => _showBookActions(book),
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        // Keep covers readable on compact phones while using
+                        // the extra width on tablets and desktop windows.
+                        final width = constraints.maxWidth;
+                        final columns = width < 360
+                            ? 2
+                            : width < 560
+                            ? 3
+                            : width < 820
+                            ? 4
+                            : width < 1120
+                            ? 5
+                            : 6;
+                        return GridView.builder(
+                          padding: const EdgeInsets.fromLTRB(14, 8, 14, 28),
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: columns,
+                                crossAxisSpacing: width >= 820 ? 14 : 10,
+                                mainAxisSpacing: 16,
+                                // BookGridCard contains title/meta below its
+                                // cover, so give wider cards a little more
+                                // vertical room to avoid clipped metadata.
+                                childAspectRatio: width >= 820 ? .60 : .55,
+                              ),
+                          itemCount: filtered.length,
+                          itemBuilder: (context, index) {
+                            final book = filtered[index];
+                            return BookGridCard(
+                              book: book,
+                              progress:
+                                  widget.progressById[book.storageId] ?? 0,
+                              onTap: () => widget.onOpen(book),
+                              onDelete: () => widget.onDelete(book),
+                              onLongPress: () => _showBookActions(book),
+                            );
+                          },
                         );
                       },
                     ),

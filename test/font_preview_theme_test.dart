@@ -26,9 +26,13 @@ void main() {
     },
   );
 
-  test('light application shell uses the requested warm paper', () {
+  test('light application shell uses the warm vellum surface', () {
     expect(VellumTheme.paper, const Color(0xfff7e4cf));
-    expect(VellumTheme.light.scaffoldBackgroundColor, VellumTheme.paper);
-    expect(VellumTheme.light.barBackgroundColor, VellumTheme.paper);
+    expect(VellumTheme.accent, const Color(0xffa95c46));
+    expect(VellumTheme.darkAccent, const Color(0xffd8896c));
+    expect(VellumTheme.shellPaper, const Color(0xfff7f3ed));
+    expect(VellumTheme.shellCard, const Color(0xfffffdf8));
+    expect(VellumTheme.light.scaffoldBackgroundColor, VellumTheme.shellPaper);
+    expect(VellumTheme.light.barBackgroundColor, VellumTheme.shellPaper);
   });
 }
