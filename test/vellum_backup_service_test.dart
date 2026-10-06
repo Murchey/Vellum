@@ -37,4 +37,43 @@ void main() {
       throwsA(isA<ArgumentError>()),
     );
   });
+
+  test('unencrypted backup bytes remain restorable without a password', () {
+    final plain = Uint8List.fromList([9, 8, 7]);
+    expect(BackupCrypto.decrypt(plain, ''), plain);
+  });
+
+  test(
+    'backup sections map persisted files without overlapping unrelated data',
+    () {
+      expect(
+        VellumBackupService.pathBelongsToSection(
+          'vellum_books/harry.json',
+          BackupSection.books,
+        ),
+        isTrue,
+      );
+      expect(
+        VellumBackupService.pathBelongsToSection(
+          'vellum_notes.json',
+          BackupSection.notes,
+        ),
+        isTrue,
+      );
+      expect(
+        VellumBackupService.pathBelongsToSection(
+          'vellum_notes.json',
+          BackupSection.books,
+        ),
+        isFalse,
+      );
+      expect(
+        VellumBackupService.pathBelongsToSection(
+          'backgrounds/paper.png',
+          BackupSection.reading,
+        ),
+        isTrue,
+      );
+    },
+  );
 }

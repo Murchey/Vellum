@@ -43,6 +43,9 @@ class ReaderMenu extends StatefulWidget {
     required this.chapterPageLabels,
     required this.bookmarks,
     required this.notes,
+    this.progressSummary,
+    this.onContinueReading,
+    this.onJumpToChapter,
     this.paragraphs,
     this.pageLabelForParagraph,
     this.onJumpToSearchHit,
@@ -109,6 +112,10 @@ class ReaderMenu extends StatefulWidget {
   final Map<int, String> chapterPageLabels;
   final List<MapEntry<int, String>> bookmarks;
   final List<ReadingNote> notes;
+  final ReaderProgressSummary? progressSummary;
+  final VoidCallback? onContinueReading;
+  final void Function(int paragraphIndex, {required bool restorePosition})?
+  onJumpToChapter;
 
   /// Body text for 全文搜索 in the catalogue panel.
   final List<String>? paragraphs;
@@ -159,6 +166,7 @@ class _ReaderMenuState extends State<ReaderMenu>
   /// expands to the viewport so the result list is not a stripe above the
   /// seek bar (the soft keyboard is up on a phone).
   var _searchActive = false;
+  double? _seekPreview;
   DateTime? _lastActionAt;
   late final AnimationController _chromeAnim = AnimationController(
     vsync: this,
@@ -470,17 +478,11 @@ class _ReaderMenuState extends State<ReaderMenu>
     final atEnd = hasChapters
         ? chapterValue >= chapterMax
         : widget.progress >= 0.999;
-    final sliderValue = hasChapters
-        ? (chapterMax == 0 ? 0.0 : chapterValue / chapterMax)
-        : widget.progress.clamp(0.0, 1.0);
+    final sliderValue = (_seekPreview ?? widget.progress).clamp(0.0, 1.0);
 
     void seek(double value) {
       if (!widget.canSeek) return;
-      if (hasChapters) {
-        widget.onSeekChapter((value * chapterMax).round());
-      } else {
-        widget.onSeekProgress(value);
-      }
+      widget.onSeekProgress(value);
     }
 
     Widget stepLabel(
@@ -497,44 +499,97 @@ class _ReaderMenuState extends State<ReaderMenu>
       );
     }
 
+    final summary = widget.progressSummary;
+    final chapterText = summary == null || summary.currentChapterTitle.isEmpty
+        ? widget.chapterTitle
+        : summary.currentChapterTitle;
+    final bookPercent = ((summary?.bookProgress ?? widget.progress) * 100)
+        .round()
+        .clamp(0, 100);
+    final chapterPercent = ((summary?.chapterProgress ?? 0) * 100)
+        .round()
+        .clamp(0, 100);
     return SizedBox(
-      height: 65,
+      height: 78,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        child: Row(
+        padding: const EdgeInsets.fromLTRB(12, 5, 12, 3),
+        child: Column(
           children: [
-            stepLabel(
-              '上一章',
-              enabled: !atStart,
-              onTap: () {
-                if (!widget.canSeek) return;
-                if (hasChapters) {
-                  widget.onSeekChapter((chapterValue - 1).clamp(0, chapterMax));
-                } else {
-                  widget.onSeekProgress((widget.progress - 0.05).clamp(0, 1));
-                }
-              },
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    chapterText.isEmpty ? '阅读进度' : chapterText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: ink.withValues(alpha: .86),
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Text(
+                  '本章 $chapterPercent% · 全书 $bookPercent%',
+                  style: TextStyle(
+                    color: ink.withValues(alpha: .55),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
             ),
             Expanded(
-              child: CupertinoSlider(
-                value: sliderValue.clamp(0.0, 1.0),
-                activeColor: accent,
-                thumbColor: accent,
-                onChanged: widget.canSeek ? seek : null,
-                onChangeEnd: widget.canSeek ? seek : null,
+              child: Row(
+                children: [
+                  stepLabel(
+                    '上一章',
+                    enabled: !atStart,
+                    onTap: () {
+                      if (!widget.canSeek) return;
+                      if (hasChapters) {
+                        widget.onSeekChapter(
+                          (chapterValue - 1).clamp(0, chapterMax),
+                        );
+                      } else {
+                        widget.onSeekProgress(
+                          (widget.progress - 0.05).clamp(0, 1),
+                        );
+                      }
+                    },
+                  ),
+                  Expanded(
+                    child: CupertinoSlider(
+                      value: sliderValue,
+                      activeColor: accent,
+                      thumbColor: accent,
+                      onChanged: widget.canSeek
+                          ? (value) => setState(() => _seekPreview = value)
+                          : null,
+                      onChangeEnd: widget.canSeek
+                          ? (value) {
+                              seek(value);
+                              if (mounted) setState(() => _seekPreview = null);
+                            }
+                          : null,
+                    ),
+                  ),
+                  stepLabel(
+                    '下一章',
+                    enabled: !atEnd,
+                    onTap: () {
+                      if (!widget.canSeek) return;
+                      if (hasChapters) {
+                        widget.onSeekChapter(
+                          (chapterValue + 1).clamp(0, chapterMax),
+                        );
+                      } else {
+                        widget.onSeekProgress(
+                          (widget.progress + 0.05).clamp(0, 1),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
-            ),
-            stepLabel(
-              '下一章',
-              enabled: !atEnd,
-              onTap: () {
-                if (!widget.canSeek) return;
-                if (hasChapters) {
-                  widget.onSeekChapter((chapterValue + 1).clamp(0, chapterMax));
-                } else {
-                  widget.onSeekProgress((widget.progress + 0.05).clamp(0, 1));
-                }
-              },
             ),
           ],
         ),
@@ -645,6 +700,9 @@ class _ReaderMenuState extends State<ReaderMenu>
         chapterPageLabels: widget.chapterPageLabels,
         currentParagraph: widget.currentParagraph,
         readingMode: widget.readingMode,
+        progressSummary: widget.progressSummary,
+        onContinueReading: widget.onContinueReading,
+        onJumpToChapter: widget.onJumpToChapter,
         onJumpToParagraph: (paragraph) {
           _closePanel();
           widget.onJumpToParagraph(paragraph);

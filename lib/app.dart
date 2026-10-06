@@ -26,6 +26,7 @@ import 'services/book_library.dart';
 import 'services/font_registry.dart';
 import 'services/notes_import.dart';
 import 'services/reading_stats.dart';
+import 'services/widget_shelf.dart';
 
 import 'theme/vellum_theme.dart';
 
@@ -314,7 +315,8 @@ class LibraryShell extends StatefulWidget {
   State<LibraryShell> createState() => _LibraryShellState();
 }
 
-class _LibraryShellState extends State<LibraryShell> {
+class _LibraryShellState extends State<LibraryShell>
+    with WidgetsBindingObserver {
   final _books = <ImportedBook>[];
 
   final _folders = <LibraryFolder>[];
@@ -323,6 +325,10 @@ class _LibraryShellState extends State<LibraryShell> {
 
   ReadingState? _continueState;
   final Map<String, double> _progressById = {};
+  final _widgetShelfSync = const WidgetShelfSync();
+  Future<void> _widgetSyncQueue = Future<void>.value();
+  Timer? _widgetSyncTimer;
+  String? _widgetCurrentBookId;
 
   int _tab = 0;
 
@@ -334,9 +340,52 @@ class _LibraryShellState extends State<LibraryShell> {
   void initState() {
     super.initState();
 
+    WidgetsBinding.instance.addObserver(this);
+
     _loadLibrary();
 
     _scheduleUpdateCheck();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _widgetSyncTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _queueWidgetShelfSync(immediate: true);
+    }
+  }
+
+  void _queueWidgetShelfSync({String? currentBookId, bool immediate = false}) {
+    if (currentBookId != null) {
+      _widgetCurrentBookId = currentBookId;
+    }
+    _widgetSyncTimer?.cancel();
+    if (immediate) {
+      _flushWidgetShelfSync();
+    } else {
+      _widgetSyncTimer = Timer(
+        const Duration(seconds: 2),
+        _flushWidgetShelfSync,
+      );
+    }
+  }
+
+  void _flushWidgetShelfSync() {
+    _widgetSyncTimer = null;
+    final snapshot = WidgetShelfSnapshot.fromBooks(
+      books: _books,
+      progressById: _progressById,
+      currentBookId: _widgetCurrentBookId,
+    );
+    _widgetSyncQueue = _widgetSyncQueue
+        .then((_) => _widgetShelfSync.publish(snapshot))
+        .catchError((_) {});
   }
 
   /// Checks the release feed once per launch, a moment after the shelf settles.
@@ -395,6 +444,8 @@ class _LibraryShellState extends State<LibraryShell> {
         ..clear()
         ..addAll(progressById);
     });
+    _widgetCurrentBookId = continueState?.bookId;
+    _queueWidgetShelfSync(immediate: true);
   }
 
   void _setImportStage(String stage) {
@@ -428,6 +479,8 @@ class _LibraryShellState extends State<LibraryShell> {
           ..clear()
           ..addAll(updated);
       });
+
+      _queueWidgetShelfSync(currentBookId: book.storageId, immediate: true);
 
       await _openBook(book);
     } on BookImportException catch (error) {
@@ -473,6 +526,11 @@ class _LibraryShellState extends State<LibraryShell> {
 
     final state = await _library.loadReadingState(full);
 
+    _continueState = state;
+    _widgetCurrentBookId = full.storageId;
+    _updateWidgetProgress(full, state);
+    _queueWidgetShelfSync(currentBookId: full.storageId, immediate: true);
+
     if (!mounted) return;
 
     await Navigator.of(context).push(
@@ -482,7 +540,13 @@ class _LibraryShellState extends State<LibraryShell> {
 
           initialState: state,
 
-          onStateChanged: (value) => _library.saveReadingState(full, value),
+          onStateChanged: (value) async {
+            await _library.saveReadingState(full, value);
+            _continueState = value;
+            _widgetCurrentBookId = full.storageId;
+            _updateWidgetProgress(full, value);
+            _queueWidgetShelfSync(currentBookId: full.storageId);
+          },
 
           installedFonts: widget.installedFonts,
 
@@ -499,7 +563,19 @@ class _LibraryShellState extends State<LibraryShell> {
 
     final latest = await _library.loadReadingState(full);
 
-    if (mounted) setState(() => _continueState = latest);
+    if (mounted) {
+      setState(() => _continueState = latest);
+      _widgetCurrentBookId = full.storageId;
+      _updateWidgetProgress(full, latest);
+      _queueWidgetShelfSync(currentBookId: full.storageId, immediate: true);
+    }
+  }
+
+  void _updateWidgetProgress(ImportedBook book, ReadingState state) {
+    final total = book.paragraphCount;
+    _progressById[book.storageId] = total > 1
+        ? (state.paragraphIndex / (total - 1)).clamp(0.0, 1.0)
+        : 0.0;
   }
 
   Future<void> _editBookCover(ImportedBook book) async {
@@ -617,6 +693,12 @@ class _LibraryShellState extends State<LibraryShell> {
     await _library.deleteBook(book);
 
     await _library.deleteReadingState(book);
+
+    if (_widgetCurrentBookId == book.storageId) {
+      _widgetCurrentBookId = _books.isEmpty ? null : _books.first.storageId;
+    }
+    _progressById.remove(book.storageId);
+    _queueWidgetShelfSync(immediate: true);
 
     // Drop the per-book reading-time row so stats never show 未知书籍.
     await const ReadingStatsService().removeBook(book.storageId);
@@ -741,7 +823,12 @@ class _LibraryShellState extends State<LibraryShell> {
 
                 await _library.clearReadingStates();
 
-                if (mounted) setState(() => _books.clear());
+                if (mounted) {
+                  setState(() => _books.clear());
+                  _progressById.clear();
+                  _widgetCurrentBookId = null;
+                  _queueWidgetShelfSync(immediate: true);
+                }
               },
 
               onClearReadingStates: _library.clearReadingStates,

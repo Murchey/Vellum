@@ -30,6 +30,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
   bool _showCloud = false;
   bool _encrypt = true;
   bool _obscureKey = true;
+  Set<BackupSection> _selectedSections = {...BackupSection.values};
 
   @override
   void initState() {
@@ -103,6 +104,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
 
   Future<void> _createLocal() async {
     if (_busy) return;
+    if (!_ensureBackupSelection()) return;
     final password = _encrypt ? await _askPassword(required: false) : null;
     if (_encrypt && (password == null || password.isEmpty)) {
       if (mounted) _toast('未设置密码，本次未创建备份');
@@ -110,7 +112,10 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
     }
     setState(() => _busy = true);
     try {
-      final file = await _service.createLocalBackup(password: password);
+      final file = await _service.createLocalBackup(
+        password: password,
+        sections: _selectedSections,
+      );
       await _refreshFiles();
       if (mounted) _toast('本地备份已创建：${_basename(file.path)}');
     } catch (error) {
@@ -122,14 +127,21 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
 
   Future<void> _exportLocal() async {
     if (_busy) return;
-    final password = await _askPassword(required: false);
+    if (!_ensureBackupSelection()) return;
+    final password = _encrypt ? await _askPassword(required: false) : '';
     if (password == null && mounted) return;
     setState(() => _busy = true);
     try {
-      final bytes = await _service.exportArchive(password: password);
+      final bytes = await _service.exportArchive(
+        password: password,
+        sections: _selectedSections,
+      );
+      final extension = password == null || password.isEmpty
+          ? 'zip'
+          : 'vbackup';
       final path = await FilePicker.platform.saveFile(
         dialogTitle: '导出 VELLUM 备份',
-        fileName: 'vellum_backup.zip',
+        fileName: 'vellum_backup.$extension',
         type: FileType.custom,
         allowedExtensions: const ['zip', 'vbackup'],
         bytes: bytes,
@@ -226,6 +238,7 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
   }
 
   Future<void> _uploadCloud() async {
+    if (!_ensureBackupSelection()) return;
     final config = _cloudConfig();
     if (!config.isConfigured) {
       _toast('请先完成云备份配置');
@@ -236,7 +249,11 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
     setState(() => _busy = true);
     try {
       await _service.saveCloudConfig(config);
-      await _service.upload(config, password: password);
+      await _service.upload(
+        config,
+        password: password,
+        sections: _selectedSections,
+      );
       await _refreshFiles();
       await _loadCloudBackups();
       if (mounted) _toast('已上传到 ${config.vendorLabel}');
@@ -268,6 +285,28 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
     );
   }
 
+  bool _ensureBackupSelection() {
+    if (_selectedSections.isNotEmpty) return true;
+    _toast('请至少选择一类备份内容');
+    return false;
+  }
+
+  void _setAllSections(bool selected) {
+    setState(() {
+      _selectedSections = selected
+          ? {...BackupSection.values}
+          : <BackupSection>{};
+    });
+  }
+
+  void _toggleSection(BackupSection section) {
+    setState(() {
+      final next = {..._selectedSections};
+      if (!next.add(section)) next.remove(section);
+      _selectedSections = next;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final bg = CupertinoTheme.of(context).scaffoldBackgroundColor;
@@ -287,6 +326,10 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
           children: [
             _heroCard(context, card, ink, muted),
             const SizedBox(height: 18),
+            Text('备份内容', style: TextStyle(color: muted, fontSize: 13)),
+            const SizedBox(height: 8),
+            _backupContentCard(context, card, muted),
+            const SizedBox(height: 18),
             Text('本地备份', style: TextStyle(color: muted, fontSize: 13)),
             const SizedBox(height: 8),
             _sectionCard(
@@ -296,7 +339,9 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                 _actionTile(
                   icon: CupertinoIcons.archivebox,
                   title: '创建本地备份',
-                  detail: _loading ? '读取中…' : '${_local.length} 个备份 · 默认加密',
+                  detail: _loading
+                      ? '读取中…'
+                      : '${_local.length} 个备份 · ${_encrypt ? '加密' : '未加密'} · ${_selectedSections.length}/${BackupSection.values.length} 类内容',
                   onTap: _busy ? null : _createLocal,
                 ),
                 _actionTile(
@@ -383,15 +428,15 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
                   _actionTile(
                     icon: CupertinoIcons.cloud_upload,
                     title: '立即上传备份',
-                    detail: _busy ? '上传中…' : '上传加密后的完整数据包',
+                    detail: _busy
+                        ? '上传中…'
+                        : '上传已选择的${_encrypt ? '加密' : '未加密'}内容',
                     onTap: _busy ? null : _uploadCloud,
                   ),
                   _actionTile(
                     icon: CupertinoIcons.refresh,
                     title: '读取云端备份',
-                    detail: _cloudLoading
-                        ? '读取中…'
-                        : '${_cloud.length} 个云端备份',
+                    detail: _cloudLoading ? '读取中…' : '${_cloud.length} 个云端备份',
                     onTap: _busy || _cloudLoading ? null : _loadCloudBackups,
                   ),
                   if (_cloud.isNotEmpty) ...[
@@ -469,6 +514,57 @@ class _BackupSettingsPageState extends State<BackupSettingsPage> {
           ],
         ),
       );
+
+  Widget _backupContentCard(
+    BuildContext context,
+    Color card,
+    Color muted,
+  ) => Container(
+    decoration: BoxDecoration(
+      color: card,
+      borderRadius: BorderRadius.circular(18),
+    ),
+    child: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '${_selectedSections.length}/${BackupSection.values.length} 类内容已选择',
+                  style: TextStyle(color: muted, fontSize: 12),
+                ),
+              ),
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: const Size(44, 36),
+                onPressed: () => _setAllSections(true),
+                child: const Text('全选'),
+              ),
+              CupertinoButton(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                minimumSize: const Size(44, 36),
+                onPressed: () => _setAllSections(false),
+                child: const Text('清空'),
+              ),
+            ],
+          ),
+        ),
+        for (final section in BackupSection.values)
+          CupertinoListTile(
+            leading: CupertinoCheckbox(
+              value: _selectedSections.contains(section),
+              activeColor: VellumTheme.accentOf(context),
+              onChanged: (_) => _toggleSection(section),
+            ),
+            title: Text(section.label),
+            subtitle: Text(section.description),
+            onTap: () => _toggleSection(section),
+          ),
+      ],
+    ),
+  );
 
   Widget _sectionCard(
     BuildContext context,

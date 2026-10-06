@@ -256,11 +256,18 @@ class ReaderParagraph extends StatelessWidget {
     if (noteCount <= 0 || onOpenNotes == null) return body;
     return Stack(
       children: [
-        Padding(padding: const EdgeInsets.only(right: 28), child: body),
-        Positioned(
-          top: 0,
-          right: 0,
-          child: _NoteMarker(count: noteCount, onTap: onOpenNotes!),
+        // The marker is an overlay. Keeping it out of the paragraph's layout
+        // width preserves the exact line wrapping and page breaks used when
+        // notes are absent, while still placing the cue beside the final line.
+        body,
+        PositionedDirectional(
+          end: 0,
+          bottom: 0,
+          child: _NoteMarker(
+            count: noteCount,
+            onTap: onOpenNotes!,
+            paragraphIndex: paragraphIndex,
+          ),
         ),
       ],
     );
@@ -456,51 +463,62 @@ class ReaderParagraph extends StatelessWidget {
 
 /// Small comment badge shown on paragraphs that carry notes.
 class _NoteMarker extends StatelessWidget {
-  const _NoteMarker({required this.count, required this.onTap});
+  const _NoteMarker({
+    required this.count,
+    required this.onTap,
+    required this.paragraphIndex,
+  });
 
   final int count;
   final VoidCallback onTap;
+  final int paragraphIndex;
 
   @override
   Widget build(BuildContext context) {
-    final bg = const Color(0xff5e5ce6).withValues(alpha: .88);
-    return CupertinoButton(
-      padding: const EdgeInsets.all(2),
-      minimumSize: const Size(32, 28),
-      onPressed: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(10),
-          boxShadow: [
-            BoxShadow(
-              color: CupertinoColors.black.withValues(alpha: .18),
-              blurRadius: 6,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              CupertinoIcons.chat_bubble_text,
-              size: 11,
-              color: CupertinoColors.white,
-            ),
-            if (count > 1) ...[
-              const SizedBox(width: 3),
-              Text(
-                '$count',
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  color: CupertinoColors.white,
-                ),
+    final bg = VellumTheme.readerAccentOf(context).withValues(alpha: .88);
+    return Semantics(
+      button: true,
+      label: count == 1
+          ? '打开第 $paragraphIndex 段笔记'
+          : '打开第 $paragraphIndex 段的 $count 条笔记',
+      child: CupertinoButton(
+        padding: const EdgeInsets.all(4),
+        minimumSize: const Size(44, 44),
+        onPressed: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: CupertinoColors.black.withValues(alpha: .18),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
               ),
             ],
-          ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                CupertinoIcons.chat_bubble_text,
+                size: 11,
+                color: CupertinoColors.white,
+              ),
+              if (count > 1) ...[
+                const SizedBox(width: 3),
+                Text(
+                  '$count',
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: CupertinoColors.white,
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );

@@ -83,13 +83,25 @@ class ReaderStatusBar extends StatelessWidget {
   const ReaderStatusBar({
     required this.pageLabel,
     required this.batteryLabel,
+    this.batteryLevel,
     this.surface,
     super.key,
   });
 
   final String pageLabel;
   final String batteryLabel;
+  final int? batteryLevel;
   final Color? surface;
+
+  /// Uses four readable visual steps as the system status bar while keeping
+  /// the tiny reader footer legible on paper backgrounds.
+  static IconData batteryIconFor(int level) {
+    final value = level.clamp(0, 100);
+    if (value <= 5) return CupertinoIcons.battery_0;
+    if (value <= 50) return CupertinoIcons.battery_25_percent;
+    if (value <= 75) return CupertinoIcons.battery_75_percent;
+    return CupertinoIcons.battery_full;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -122,9 +134,13 @@ class ReaderStatusBar extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      CupertinoIcons.battery_75_percent,
+                      batteryLevel == null
+                          ? CupertinoIcons.battery_75_percent
+                          : batteryIconFor(batteryLevel!),
                       size: 14,
-                      color: ink.withValues(alpha: .55),
+                      color: batteryLevel != null && batteryLevel! <= 15
+                          ? CupertinoColors.systemRed
+                          : ink.withValues(alpha: .55),
                     ),
                     const SizedBox(width: 3),
                     Text(
@@ -216,73 +232,104 @@ class BookmarkRibbon extends StatelessWidget {
     final bg = surface ?? VellumTheme.readerChromeOf(context);
     final ink = VellumTheme.readerChromeInk(bg);
     final accent = VellumTheme.readerAccentOf(context);
-    final ribbonLength = (pinned ? 72.0 : 28 + progress * 52).clamp(28.0, 90.0);
-    final ribbonColor = pinned
+    final normalizedProgress = progress.clamp(0.0, 1.2);
+    final easedProgress = Curves.easeOutCubic.transform(
+      (normalizedProgress / 1.2).clamp(0.0, 1.0),
+    );
+    final ribbonLength = pinned ? 72.0 : 22 + easedProgress * 68;
+    final idleColor = alreadyBookmarked
+        ? accent.withValues(alpha: .55)
+        : ink.withValues(alpha: .45);
+    final ribbonColor = pinned || armed
         ? accent
-        : (armed
-              ? accent
-              : (alreadyBookmarked
-                    ? accent.withValues(alpha: .55)
-                    : ink.withValues(alpha: .45)));
-    return IgnorePointer(
-      child: SafeArea(
-        child: Align(
-          alignment: Alignment.topRight,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              ClipPath(
-                clipper: const _BookmarkNotchClipper(),
-                child: Container(
-                  width: pinned ? 28 : 22,
+        : Color.lerp(idleColor, accent.withValues(alpha: .82), easedProgress)!;
+    final visibleLabelOpacity = showLabel
+        ? (0.18 + easedProgress * .82).clamp(0.0, 1.0)
+        : 0.0;
+    final semanticsLabel = pinned ? '当前阅读位置已添加书签' : label;
+    return Semantics(
+      container: true,
+      liveRegion: showLabel,
+      label: semanticsLabel,
+      child: IgnorePointer(
+        child: SafeArea(
+          child: Align(
+            alignment: Alignment.topRight,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  curve: Curves.easeOutCubic,
+                  width: pinned ? 28 : 22 + easedProgress * 3,
                   height: ribbonLength,
-                  color: ribbonColor,
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Icon(
-                        armed || alreadyBookmarked || pinned
-                            ? CupertinoIcons.bookmark_fill
-                            : CupertinoIcons.bookmark,
-                        size: 14,
-                        color: CupertinoColors.white,
+                  child: ClipPath(
+                    clipper: const _BookmarkNotchClipper(),
+                    child: ColoredBox(
+                      color: ribbonColor,
+                      child: Align(
+                        alignment: Alignment.topCenter,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 120),
+                            transitionBuilder: (child, animation) =>
+                                ScaleTransition(scale: animation, child: child),
+                            child: Icon(
+                              armed || alreadyBookmarked || pinned
+                                  ? CupertinoIcons.bookmark_fill
+                                  : CupertinoIcons.bookmark,
+                              key: ValueKey(
+                                armed || alreadyBookmarked || pinned,
+                              ),
+                              size: 14,
+                              color: CupertinoColors.white,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              if (showLabel) ...[
-                const SizedBox(height: 6),
-                Opacity(
-                  opacity: progress.clamp(0.25, 1.0),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: bg.withValues(alpha: .94),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: armed
-                            ? accent.withValues(alpha: .55)
-                            : ink.withValues(alpha: .18),
-                      ),
-                    ),
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        color: armed ? accent : ink,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
+                if (showLabel) ...[
+                  const SizedBox(height: 6),
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 120),
+                    curve: Curves.easeOut,
+                    opacity: visibleLabelOpacity,
+                    child: AnimatedSlide(
+                      duration: const Duration(milliseconds: 120),
+                      curve: Curves.easeOutCubic,
+                      offset: Offset(0, (1 - easedProgress) * -.18),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: bg.withValues(alpha: .94),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: armed
+                                ? accent.withValues(alpha: .55)
+                                : ink.withValues(alpha: .18),
+                          ),
+                        ),
+                        child: Text(
+                          label,
+                          style: TextStyle(
+                            color: armed ? accent : ink,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

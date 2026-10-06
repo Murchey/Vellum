@@ -6,6 +6,7 @@ import '../services/book_importer.dart';
 import '../util/text_slices.dart';
 import 'reader_markup.dart';
 import 'reader_models.dart';
+import 'reader_toc.dart';
 
 /// Immutable layout inputs for page-mode pagination.
 class PageLayoutConfig {
@@ -119,11 +120,11 @@ class ProgressiveBookPager {
 
   final Map<int, int> _paragraphFirstPage = {};
 
-  /// TOC paragraphs as a set: the per-paragraph `tocEntries.any(...)` scan was
-  /// O(entries) inside the layout loop, which a chapter-heavy book paid once per
-  /// paragraph on every re-layout.
+  /// Cleaned navigation paragraphs as a set: the per-paragraph TOC scan was
+  /// O(entries) inside the layout loop, which a chapter-heavy book paid once
+  /// per paragraph on every re-layout.
   late final Set<int> _tocParagraphs = {
-    for (final entry in book.tocEntries) entry.paragraphIndex,
+    for (final entry in chapterEntries(book)) entry.key,
   };
 
   int _nextParagraph = 0;

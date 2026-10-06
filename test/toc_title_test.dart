@@ -171,6 +171,39 @@ void main() {
       expect(chapters.map((entry) => entry.value).toList(), ['第一章', '第二章']);
     });
 
+    test(
+      'chapterEntries removes footnote prose and repairs nearby headings',
+      () {
+        final book = ImportedBook(
+          title: '大书',
+          format: BookFormat.mobi,
+          paragraphs: [
+            '前言',
+            '正文',
+            '脚注解释，这是一段不应出现在章节导航中的说明。',
+            '[[b]]第1章[[/b]]',
+            '[[b]]开端[[/b]]',
+            '正文二',
+            '附 录',
+          ],
+          tocEntries: [
+            BookTocEntry(title: '前言', paragraphIndex: 0),
+            BookTocEntry(title: '脚注解释，这是一段不应出现在章节导航中的说明。', paragraphIndex: 2),
+            BookTocEntry(title: '第1章 开端', paragraphIndex: 2),
+            BookTocEntry(title: '附录', paragraphIndex: 6),
+          ],
+        );
+
+        final chapters = chapterEntries(book);
+        expect(chapters.map((entry) => entry.value).toList(), [
+          '前言',
+          '第1章 开端',
+          '附录',
+        ]);
+        expect(chapters.map((entry) => entry.key).toList(), [0, 3, 6]);
+      },
+    );
+
     test('heuristic chapters are detected and shown cleaned', () {
       final chapters = heuristicChapterEntries([
         '第一章 夜雨',

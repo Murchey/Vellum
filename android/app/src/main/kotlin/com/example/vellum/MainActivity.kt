@@ -32,6 +32,10 @@ class MainActivity : FlutterActivity() {
                 "canRequestInstall" -> result.success(canRequestInstall())
                 "openInstallSettings" -> openInstallSettings(result)
                 "installApk" -> installApk(call.argument<String>("path"), result)
+                "updateWidgetShelf" -> updateWidgetShelf(
+                    call.argument<String>("snapshot"),
+                    result,
+                )
                 "setScreenBrightness" -> setScreenBrightness(
                     call.argument<Double>("value") ?: -1.0,
                     result,
@@ -67,6 +71,34 @@ class MainActivity : FlutterActivity() {
             window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
         result.success(true)
+    }
+
+    /**
+     * Stores only the small widget metadata snapshot. The widget never reads
+     * book bodies or the app's backup/state files directly.
+     */
+    private fun updateWidgetShelf(snapshot: String?, result: MethodChannel.Result) {
+        if (snapshot.isNullOrBlank() || snapshot.length > 32 * 1024) {
+            result.error("BAD_SNAPSHOT", "widget snapshot is empty or too large", null)
+            return
+        }
+        try {
+            val target = File(filesDir, VellumWidgetProvider.SNAPSHOT_FILE)
+            val temporary = File(filesDir, "${VellumWidgetProvider.SNAPSHOT_FILE}.tmp")
+            temporary.writeText(snapshot, Charsets.UTF_8)
+            if (target.exists() && !target.delete()) {
+                result.error("SNAPSHOT_WRITE_FAILED", "cannot replace widget snapshot", null)
+                return
+            }
+            if (!temporary.renameTo(target)) {
+                result.error("SNAPSHOT_WRITE_FAILED", "cannot commit widget snapshot", null)
+                return
+            }
+            VellumWidgetProvider.refreshAll(this)
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("SNAPSHOT_WRITE_FAILED", error.message, null)
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {

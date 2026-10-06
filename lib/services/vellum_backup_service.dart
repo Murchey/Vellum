@@ -92,6 +92,43 @@ class VellumCloudBackupObject {
   String get fileName => key.split('/').last;
 }
 
+/// User-selectable groups of data that can be included in a VELLUM backup.
+///
+/// The mapping is intentionally based on persisted paths instead of model
+/// objects. This keeps the archive format stable and lets older backups be
+/// restored without knowing which choices were made when they were created.
+enum BackupSection {
+  books,
+  reading,
+  notes,
+  statistics,
+  writing,
+  fonts,
+  appSettings,
+}
+
+extension BackupSectionDetails on BackupSection {
+  String get label => switch (this) {
+    BackupSection.books => '书籍与书库',
+    BackupSection.reading => '阅读进度与阅读设置',
+    BackupSection.notes => '笔记与划线',
+    BackupSection.statistics => '阅读统计',
+    BackupSection.writing => '写作内容',
+    BackupSection.fonts => '字体',
+    BackupSection.appSettings => '应用设置',
+  };
+
+  String get description => switch (this) {
+    BackupSection.books => '已导入的书籍、目录和书库排序',
+    BackupSection.reading => '阅读位置、纸张、听书和显示偏好',
+    BackupSection.notes => '段落笔记、划线和批注',
+    BackupSection.statistics => '累计阅读时间和每日统计',
+    BackupSection.writing => '写作草稿和编辑器排版设置',
+    BackupSection.fonts => '导入字体和字体偏好',
+    BackupSection.appSettings => '文件夹、更新源等其他设置',
+  };
+}
+
 class VellumBackupService {
   VellumBackupService({
     FlutterSecureStorage? secureStorage,
@@ -144,7 +181,13 @@ class VellumBackupService {
     }
   }
 
-  Future<Uint8List> exportArchive({String? password}) async {
+  Future<Uint8List> exportArchive({
+    String? password,
+    Set<BackupSection>? sections,
+  }) async {
+    final selected = sections == null
+        ? BackupSection.values.toSet()
+        : Set<BackupSection>.of(sections);
     final docs = await _documents();
     final archive = Archive();
     final info = await PackageInfo.fromPlatform();
@@ -156,6 +199,7 @@ class VellumBackupService {
           'format': 1,
           'version': info.version,
           'createdAt': DateTime.now().toUtc().toIso8601String(),
+          'sections': [for (final section in selected) section.name],
         }),
       ),
     );
@@ -163,7 +207,11 @@ class VellumBackupService {
       await for (final entity in docs.list(recursive: true)) {
         if (entity is! File) continue;
         final relative = _relative(entity.path, docs.path);
-        if (relative == null || _isExcluded(relative)) continue;
+        if (relative == null ||
+            _isExcluded(relative) ||
+            !_belongsToSelectedSection(relative, selected)) {
+          continue;
+        }
         archive.addFile(
           ArchiveFile.bytes('files/$relative', await entity.readAsBytes()),
         );
@@ -175,8 +223,11 @@ class VellumBackupService {
         : BackupCrypto.encrypt(zip, password);
   }
 
-  Future<File> createLocalBackup({String? password}) async {
-    final bytes = await exportArchive(password: password);
+  Future<File> createLocalBackup({
+    String? password,
+    Set<BackupSection>? sections,
+  }) async {
+    final bytes = await exportArchive(password: password, sections: sections);
     final dir = await localBackupDirectory();
     final suffix = password == null || password.isEmpty ? 'zip' : 'vbackup';
     final stamp = _stamp(DateTime.now());
@@ -310,10 +361,12 @@ class VellumBackupService {
   Future<VellumBackupItem> upload(
     VellumCloudConfig config, {
     String? password,
+    Set<BackupSection>? sections,
   }) async {
     if (!config.isConfigured) throw StateError('云备份配置不完整');
-    final bytes = await exportArchive(password: password);
-    final fileName = 'vellum_${_stamp(DateTime.now())}.zip';
+    final bytes = await exportArchive(password: password, sections: sections);
+    final suffix = password == null || password.isEmpty ? 'zip' : 'vbackup';
+    final fileName = 'vellum_${_stamp(DateTime.now())}.$suffix';
     final key = '${config.normalizedPrefix}/$fileName';
     final uri = Uri(
       scheme: config.scheme,
@@ -346,6 +399,44 @@ class VellumBackupService {
   }
 
   void dispose() => _client.close();
+
+  /// Returns whether a persisted relative path belongs to [section]. Exposed
+  /// for tests and for keeping the selection UI/documentation in sync.
+  static bool pathBelongsToSection(String relative, BackupSection section) {
+    final path = relative.replaceAll('\\', '/').toLowerCase();
+    switch (section) {
+      case BackupSection.books:
+        return path == 'vellum_library.json' ||
+            path.startsWith('vellum_books/');
+      case BackupSection.reading:
+        return path == 'vellum_reading_state.json' ||
+            path == 'vellum_reader_prefs.json' ||
+            path == 'vellum_backgrounds.json' ||
+            path.startsWith('backgrounds/') ||
+            path == 'vellum_tts_prefs.json' ||
+            path == 'vellum_listening.json';
+      case BackupSection.notes:
+        return path == 'vellum_notes.json';
+      case BackupSection.statistics:
+        return path == 'vellum_reading_stats.json';
+      case BackupSection.writing:
+        return path == 'vellum_writings.json' ||
+            path == 'vellum_writing_typo.json';
+      case BackupSection.fonts:
+        return path == 'vellum_font.ttf' ||
+            path == 'vellum_font_preferences.json' ||
+            path.startsWith('vellum_fonts/');
+      case BackupSection.appSettings:
+        return path == 'vellum_folders.json' ||
+            path == 'vellum_update_repo.txt' ||
+            path == 'vellum_update_auto.txt';
+    }
+  }
+
+  bool _belongsToSelectedSection(String relative, Set<BackupSection> selected) {
+    if (selected.isEmpty) return false;
+    return selected.any((section) => pathBelongsToSection(relative, section));
+  }
 
   bool _isExcluded(String relative) {
     final normalized = relative.replaceAll('\\', '/');

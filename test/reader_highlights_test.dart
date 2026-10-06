@@ -104,6 +104,34 @@ void main() {
     expect(pageDx, lessThan(80));
   });
 
+  testWidgets('status bar battery icon follows the reported level', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const CupertinoApp(
+        home: CupertinoPageScaffold(
+          child: ReaderStatusBar(
+            pageLabel: '1 / 2',
+            batteryLabel: '18%',
+            batteryLevel: 18,
+          ),
+        ),
+      ),
+    );
+    final icon = tester.widget<Icon>(find.byType(Icon).first);
+    expect(icon.icon, ReaderStatusBar.batteryIconFor(18));
+    expect(icon.icon, isNot(CupertinoIcons.battery_75_percent));
+  });
+
+  test('battery icon buckets clamp edge percentages', () {
+    expect(ReaderStatusBar.batteryIconFor(0), CupertinoIcons.battery_0);
+    expect(
+      ReaderStatusBar.batteryIconFor(51),
+      CupertinoIcons.battery_75_percent,
+    );
+    expect(ReaderStatusBar.batteryIconFor(101), CupertinoIcons.battery_full);
+  });
+
   testWidgets('reader running head shows the chapter at top left', (
     tester,
   ) async {

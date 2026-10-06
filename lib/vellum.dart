@@ -31,6 +31,7 @@ export 'services/library_models.dart';
 export 'services/notes_import.dart';
 export 'services/notes_library.dart';
 export 'services/reading_stats.dart';
+export 'services/widget_shelf.dart';
 export 'services/vellum_update_service.dart';
 export 'services/writing_library.dart';
 export 'theme/vellum_theme.dart';

@@ -3,6 +3,33 @@ import 'package:flutter/physics.dart';
 
 enum ReadingMode { scroll, page }
 
+/// A lightweight snapshot for the reader's catalogue and seek controls.
+///
+/// It is derived from the live reader position and is deliberately separate
+/// from [ReadingState]: opening the catalogue should never introduce a new
+/// persisted format or migrate an existing book's progress JSON.
+class ReaderProgressSummary {
+  const ReaderProgressSummary({
+    required this.bookProgress,
+    required this.chapterProgress,
+    required this.currentChapterIndex,
+    required this.currentChapterTitle,
+    required this.currentPageLabel,
+    required this.resumeChapterTitle,
+    required this.hasResumePosition,
+    required this.isAtResumePosition,
+  });
+
+  final double bookProgress;
+  final double chapterProgress;
+  final int currentChapterIndex;
+  final String currentChapterTitle;
+  final String currentPageLabel;
+  final String resumeChapterTitle;
+  final bool hasResumePosition;
+  final bool isAtResumePosition;
+}
+
 /// PagePhysics that settles on a page without a visible overscroll bounce.
 ///
 /// Tuned toward Fanqie's custom Scroller (`nt5/g.java`): friction is very low

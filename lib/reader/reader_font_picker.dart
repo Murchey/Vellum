@@ -45,7 +45,6 @@ class ReaderFontPickerSheet extends StatefulWidget {
 }
 
 class _ReaderFontPickerSheetState extends State<ReaderFontPickerSheet> {
-  int _filter = 2;
   final _query = TextEditingController();
 
   @override
@@ -77,11 +76,6 @@ class _ReaderFontPickerSheetState extends State<ReaderFontPickerSheet> {
               font.family.toLowerCase().contains(query),
         )
         .toList();
-    final showSystem = _filter == 0 || _filter == 2;
-    final showImported = _filter == 1 || _filter == 2;
-    final itemCount =
-        (showSystem ? fanqieReaderFonts.length : 0) +
-        (showImported ? imported.length : 0);
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.sizeOf(context).height * .78,
@@ -139,40 +133,7 @@ class _ReaderFontPickerSheetState extends State<ReaderFontPickerSheet> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  CupertinoSegmentedControl<int>(
-                    groupValue: _filter,
-                    onValueChanged: (value) => setState(() => _filter = value),
-                    selectedColor: accent.withValues(alpha: .16),
-                    borderColor: ink.withValues(alpha: .16),
-                    pressedColor: accent.withValues(alpha: .10),
-                    children: {
-                      0: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        child: Text('内置', style: TextStyle(color: ink)),
-                      ),
-                      1: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        child: Text(
-                          '我的字体（${installedFonts.length}）',
-                          style: TextStyle(color: ink),
-                        ),
-                      ),
-                      2: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        child: Text('全部', style: TextStyle(color: ink)),
-                      ),
-                    },
-                  ),
-                  if (showImported && installedFonts.length > 4) ...[
+                  if (installedFonts.length > 4) ...[
                     const SizedBox(height: 8),
                     CupertinoTextField(
                       controller: _query,
@@ -203,67 +164,75 @@ class _ReaderFontPickerSheetState extends State<ReaderFontPickerSheet> {
             ),
             Container(height: .5, color: divider),
             Expanded(
-              child: itemCount == 0
-                  ? Center(
-                      child: Text('没有匹配的字体', style: TextStyle(color: muted)),
-                    )
-                  : ListView.separated(
-                      padding: EdgeInsets.zero,
-                      itemCount: itemCount,
-                      separatorBuilder: (_, _) =>
-                          Container(height: .5, color: divider),
-                      itemBuilder: (context, index) {
-                        if (showSystem && index < fanqieReaderFonts.length) {
-                          final option = fanqieReaderFonts[index];
-                          return _row(
-                            title: option.title,
-                            family: option.family == 'Default'
-                                ? null
-                                : option.family,
-                            selected:
-                                activeFamily == option.family ||
-                                (option.family == 'Default' &&
-                                    (activeFamily.isEmpty ||
-                                        activeFamily == 'Georgia')),
-                            muted: muted,
-                            accent: accent,
-                            ink: ink,
-                            selectedFill: selectedFill,
-                            selectedBorder: selectedBorder,
-                            onTap: () => onSelectSystemFont(
-                              option.family == 'Default'
-                                  ? 'Georgia'
-                                  : option.family,
-                            ),
-                          );
-                        }
-                        final importedIndex =
-                            index - (showSystem ? fanqieReaderFonts.length : 0);
-                        final font = imported[importedIndex];
-                        return _row(
-                          title: font.label,
-                          family: font.family,
-                          selected: activeFamily == font.family,
-                          muted: muted,
-                          accent: accent,
-                          ink: ink,
-                          selectedFill: selectedFill,
-                          selectedBorder: selectedBorder,
-                          custom: FontPreview(
-                            font: font,
-                            compact: true,
-                            ink: activeFamily == font.family ? accent : muted,
-                          ),
-                          onTap: () => onSelectImportedFont(font),
-                        );
-                      },
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _sectionTitle('内置', ink),
+                  for (final option in fanqieReaderFonts)
+                    _row(
+                      title: option.title,
+                      family: option.family == 'Default' ? null : option.family,
+                      selected:
+                          activeFamily == option.family ||
+                          (option.family == 'Default' &&
+                              (activeFamily.isEmpty ||
+                                  activeFamily == 'Georgia')),
+                      muted: muted,
+                      accent: accent,
+                      ink: ink,
+                      selectedFill: selectedFill,
+                      selectedBorder: selectedBorder,
+                      onTap: () => onSelectSystemFont(
+                        option.family == 'Default' ? 'Georgia' : option.family,
+                      ),
                     ),
+                  _sectionTitle('我的导入', ink),
+                  if (imported.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 22),
+                      child: Text(
+                        query.isEmpty ? '还没有导入字体' : '没有匹配的字体',
+                        style: TextStyle(color: muted),
+                      ),
+                    )
+                  else
+                    for (final font in imported)
+                      _row(
+                        title: font.label,
+                        family: font.family,
+                        selected: activeFamily == font.family,
+                        muted: muted,
+                        accent: accent,
+                        ink: ink,
+                        selectedFill: selectedFill,
+                        selectedBorder: selectedBorder,
+                        custom: FontPreview(
+                          font: font,
+                          compact: true,
+                          ink: activeFamily == font.family ? accent : muted,
+                        ),
+                        onTap: () => onSelectImportedFont(font),
+                      ),
+                ],
+              ),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _sectionTitle(String title, Color ink) => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
+    child: Text(
+      title,
+      style: TextStyle(
+        color: ink.withValues(alpha: .62),
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+      ),
+    ),
+  );
 
   Widget _row({
     required String title,

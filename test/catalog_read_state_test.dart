@@ -161,4 +161,70 @@ void main() {
     expect(ReaderDirectoryPanel.itemExtentForTest, 54);
     expect(item.padding, const EdgeInsets.symmetric(horizontal: 20));
   });
+
+  testWidgets('catalog exposes resume progress and chapter jump semantics', (
+    tester,
+  ) async {
+    final chapterJumps = <({int paragraph, bool restore})>[];
+    var continued = false;
+    const summary = ReaderProgressSummary(
+      bookProgress: .42,
+      chapterProgress: .35,
+      currentChapterIndex: 1,
+      currentChapterTitle: '第二章',
+      currentPageLabel: '第 42 页',
+      resumeChapterTitle: '第二章',
+      hasResumePosition: true,
+      isAtResumePosition: false,
+    );
+
+    await tester.pumpWidget(
+      CupertinoApp(
+        home: CupertinoPageScaffold(
+          child: SizedBox(
+            height: 620,
+            child: ReaderDirectoryPanel(
+              bookTitle: '进度书',
+              chapters: const [
+                MapEntry(0, '第一章'),
+                MapEntry(50, '第二章'),
+                MapEntry(100, '第三章'),
+              ],
+              bookmarks: const [],
+              notes: const <ReadingNote>[],
+              chapterPageLabels: const {50: '第 42 页'},
+              currentParagraph: 60,
+              readingMode: ReadingMode.page,
+              progressSummary: summary,
+              onContinueReading: () => continued = true,
+              onJumpToChapter: (paragraph, {required restorePosition}) {
+                chapterJumps.add((
+                  paragraph: paragraph,
+                  restore: restorePosition,
+                ));
+              },
+              onJumpToParagraph: (_) {},
+              onRemoveBookmark: (_) async {},
+              onRemoveNote: (_) async {},
+              onClose: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('继续阅读'), findsOneWidget);
+    expect(find.text('全书 42% · 本章 35% · 第 42 页'), findsOneWidget);
+    expect(find.text('读到 35% · 第 42 页'), findsOneWidget);
+
+    await tester.tap(find.byIcon(CupertinoIcons.chevron_forward));
+    expect(continued, isTrue);
+
+    await tester.tap(find.text('第二章').last);
+    await tester.tap(find.text('第一章').last);
+    expect(chapterJumps, hasLength(2));
+    expect(chapterJumps[0], (paragraph: 50, restore: true));
+    expect(chapterJumps[1], (paragraph: 0, restore: false));
+  });
 }
