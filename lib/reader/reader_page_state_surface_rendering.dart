@@ -16,38 +16,40 @@ import 'reader_page_state.dart';
 import 'reader_page_state_pagination.dart';
 import 'reader_page_state_gestures.dart';
 
-Widget renderReaderPage(ReaderPageState state, BuildContext context) => state.renderReaderPage(context);
+Widget renderReaderPage(ReaderPageState state, BuildContext context) =>
+    state.renderReaderPage(context);
 
 extension ReaderPageSurfaceRendering on ReaderPageState {
   ReaderPageSurface readerSurface() => ReaderPageSurface(
-        book: widget.book,
-        readingMode: readingMode,
-        scrollController: scrollController,
-        pageController: pageController,
-        pageCount: pageCount,
-        pages: pages,
-        currentPage: currentPage,
-        sideInset: ReaderPageState.readerSideInset,
-        topInset: ReaderPageState.readerTopInset,
-        bottomInset: ReaderPageState.readerBottomInset,
-        fontSize: fontSize,
-        fontFamily: readerFontFamily,
-        lineSpacing: lineSpacing,
-        fontWeight: readerFontWeight,
-        ink: readerInk,
-        tocParagraphs: tocParagraphs,
-        paragraphKeys: paragraphKeys,
-        highlights: highlights,
-        spokenSentence: spokenSentence,
-        searchHighlight: searchHighlight,
-        noteCountFor: noteCountFor,
-        contextMenuBuilder: contextMenuForParagraph,
-        onOpenNotes: openNotesForParagraph,
-        onJumpToParagraph: jumpToParagraph,
-        onBookmarkPull: handleBookmarkPull,
-        onRestorePage: restorePageWhenReady,
-        onPageChanged: handleSurfacePageChanged,
-      );
+    book: widget.book,
+    readingMode: readingMode,
+    scrollController: scrollController,
+    pageController: pageController,
+    pageCount: pageCount,
+    pages: pages,
+    currentPage: currentPage,
+    showBookTitle: !pager.isAnchored,
+    sideInset: ReaderPageState.readerSideInset,
+    topInset: ReaderPageState.readerTopInset,
+    bottomInset: ReaderPageState.readerBottomInset,
+    fontSize: fontSize,
+    fontFamily: readerFontFamily,
+    lineSpacing: lineSpacing,
+    fontWeight: readerFontWeight,
+    ink: readerInk,
+    tocParagraphs: tocParagraphs,
+    paragraphKeys: paragraphKeys,
+    highlights: highlights,
+    spokenSentence: spokenSentence,
+    searchHighlight: searchHighlight,
+    noteCountFor: noteCountFor,
+    contextMenuBuilder: contextMenuForParagraph,
+    onOpenNotes: openNotesForParagraph,
+    onJumpToParagraph: jumpToParagraph,
+    onBookmarkPull: handleBookmarkPull,
+    onRestorePage: restorePageWhenReady,
+    onPageChanged: handleSurfacePageChanged,
+  );
 
   Widget renderReaderPage(BuildContext context) {
     if (readingMode == ReadingMode.page) {
@@ -325,11 +327,18 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
                 progressSummary: progressSummary,
                 onContinueReading: () {
                   refresh(() => showControls = false);
-                  jumpToParagraph(resumeParagraphIndex);
+                  jumpToParagraph(
+                    resumeParagraphIndex,
+                    preloadPreviousPage: true,
+                  );
                 },
                 onJumpToChapter: (paragraph, {required restorePosition}) {
                   refresh(() => showControls = false);
-                  jumpToParagraph(paragraph, restoreChapter: restorePosition);
+                  jumpToParagraph(
+                    paragraph,
+                    restoreChapter: restorePosition,
+                    preloadPreviousPage: true,
+                  );
                 },
                 fontSize: fontSize,
                 readerFontWeight: readerFontWeight,
@@ -450,7 +459,7 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
 
   void changePage(BuildContext context, int delta) {
     if (!pageController.hasClients) return;
-    final totalPages = pageCount;
+    var totalPages = pageCount;
     if (totalPages <= 0) return;
     final live = pageController.hasClients
         ? pageController.page?.round()
@@ -458,8 +467,27 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
     var base = (live ?? requestedPage).clamp(0, totalPages - 1).toInt();
     if (coverFromPage != null) base = coverToPage ?? base;
     if (slideBusy) base = requestedPage.clamp(0, totalPages - 1).toInt();
+
+    // An anchored deep jump deliberately starts at local page zero.  If the
+    // reader asks for the previous page there, materialise a bounded prefix
+    // before calculating the target; otherwise the old clamp below would turn
+    // the request into a no-op and make the chapter home feel locked.
+    if (delta < 0 && base == 0 && !coverAnim.isAnimating && !slideBusy) {
+      final prepared = preparePreviousPage();
+      if (prepared != null) {
+        base = prepared;
+        totalPages = pageCount;
+      }
+    }
     final target = (base + delta).clamp(0, totalPages - 1).toInt();
-    if (target == base && !coverAnim.isAnimating && !slideBusy) return;
+    if (target == base && !coverAnim.isAnimating && !slideBusy) {
+      // A fast reader can consume the last currently materialised page before
+      // the asynchronous slice has rebuilt the PageView. A forward tap at
+      // that boundary is a useful retry signal, so kick the same extension
+      // path instead of silently dropping the gesture.
+      if (delta > 0) maybeExtendPagination();
+      return;
+    }
     onPageTurned();
 
     if (pageTurnStyle == PageTurnStyle.none) {
@@ -468,6 +496,7 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
         currentPage = target;
       });
       jumpToPageExact(target);
+      maybeExtendPagination();
       scheduleSave();
       return;
     }
@@ -508,6 +537,10 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
             requestedPage = target;
           });
           slideBusy = false;
+          // Slide turns suppress PageView.onPageChanged while animating.
+          // Extend an anchored window from the committed page so the reader
+          // can continue past the current PageView itemCount.
+          maybeExtendPagination();
           scheduleSave();
         });
   }
@@ -541,6 +574,10 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
       currentPage = to;
       requestedPage = to;
     });
+    // Cover turns keep PageView on the previous page until the overlay settles,
+    // so its onPageChanged callback is intentionally ignored. Start the next
+    // pagination slice from the committed page instead.
+    maybeExtendPagination();
     // Drop the overlay one frame after the jump so the user never sees
     // PageView rebuild/layout under the cover.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -554,10 +591,9 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
       final pending = pendingPageDelta;
       pendingPageDelta = 0;
       if (pending != 0) {
-        final totalPages = pageCount;
-        final base = to.clamp(0, totalPages - 1).toInt();
-        final next = (base + pending).clamp(0, totalPages - 1).toInt();
-        if (next != base) startCoverTurn(base, next);
+        // Re-enter the normal path so a queued backwards turn can request a
+        // bounded predecessor page at an anchored window boundary.
+        changePage(context, pending);
       }
     });
   }
@@ -588,7 +624,3 @@ extension ReaderPageSurfaceRendering on ReaderPageState {
     );
   }
 }
-
-
-
-

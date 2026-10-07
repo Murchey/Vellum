@@ -18,6 +18,7 @@ class ReaderPageSurface extends StatelessWidget {
     required this.pageCount,
     required this.pages,
     required this.currentPage,
+    required this.showBookTitle,
     required this.sideInset,
     required this.topInset,
     required this.bottomInset,
@@ -49,6 +50,11 @@ class ReaderPageSurface extends StatelessWidget {
   final int pageCount;
   final List<List<PageFragment>> pages;
   final int currentPage;
+
+  /// Whether the current page window starts at the actual beginning of the
+  /// book. An anchored deep jump also has local page 0, but it must not render
+  /// the book title or be treated as a home page.
+  final bool showBookTitle;
   final double sideInset;
   final double topInset;
   final double bottomInset;
@@ -64,7 +70,7 @@ class ReaderPageSurface extends StatelessWidget {
   final String searchHighlight;
   final int Function(int paragraphIndex) noteCountFor;
   final EditableTextContextMenuBuilder Function(int paragraphIndex)
-      contextMenuBuilder;
+  contextMenuBuilder;
   final ValueChanged<int> onOpenNotes;
   final ValueChanged<int> onJumpToParagraph;
   final bool Function(ScrollNotification) onBookmarkPull;
@@ -91,13 +97,12 @@ class ReaderPageSurface extends StatelessWidget {
             if (index == 1) return const SizedBox(height: 30);
             final paragraphIndex = index - 2;
             final isHeading =
-                ReaderMarkup.heading.hasMatch(book.paragraphs[paragraphIndex]) ||
+                ReaderMarkup.heading.hasMatch(
+                  book.paragraphs[paragraphIndex],
+                ) ||
                 tocParagraphs.contains(paragraphIndex);
             return KeyedSubtree(
-              key: paragraphKeys.putIfAbsent(
-                paragraphIndex,
-                () => GlobalKey(),
-              ),
+              key: paragraphKeys.putIfAbsent(paragraphIndex, () => GlobalKey()),
               child: Padding(
                 padding: EdgeInsets.only(bottom: 22, top: isHeading ? 10 : 0),
                 child: _paragraph(paragraphIndex),
@@ -133,37 +138,37 @@ class ReaderPageSurface extends StatelessWidget {
   }
 
   Widget _title() => Text(
-        book.title,
-        style: TextStyle(
-          fontFamily: fontFamily,
-          fontSize: fontSize + 9,
-          height: 1.3,
-          fontWeight: FontWeight.w600,
-          color: ink,
-        ),
-      );
+    book.title,
+    style: TextStyle(
+      fontFamily: fontFamily,
+      fontSize: fontSize + 9,
+      height: 1.3,
+      fontWeight: FontWeight.w600,
+      color: ink,
+    ),
+  );
 
   Widget _paragraph(int paragraphIndex) => ReaderParagraph(
-        book: book,
-        paragraph: book.paragraphs[paragraphIndex],
-        paragraphIndex: paragraphIndex,
-        fontSize: fontSize,
-        fontFamily: fontFamily,
-        lineSpacing: lineSpacing,
-        fontWeight: fontWeight,
-        ink: ink,
-        contextMenuBuilder: contextMenuBuilder(paragraphIndex),
-        highlights: [
-          ...?highlights[paragraphIndex],
-          if (spokenSentence.isNotEmpty) spokenSentence,
-        ],
-        searchHighlight: searchHighlight,
-        isChapterHeading: tocParagraphs.contains(paragraphIndex),
-        noteCount: noteCountFor(paragraphIndex),
-        onOpenNotes: () => onOpenNotes(paragraphIndex),
-        onJumpToParagraph: onJumpToParagraph,
-        selectable: selectable,
-      );
+    book: book,
+    paragraph: book.paragraphs[paragraphIndex],
+    paragraphIndex: paragraphIndex,
+    fontSize: fontSize,
+    fontFamily: fontFamily,
+    lineSpacing: lineSpacing,
+    fontWeight: fontWeight,
+    ink: ink,
+    contextMenuBuilder: contextMenuBuilder(paragraphIndex),
+    highlights: [
+      ...?highlights[paragraphIndex],
+      if (spokenSentence.isNotEmpty) spokenSentence,
+    ],
+    searchHighlight: searchHighlight,
+    isChapterHeading: tocParagraphs.contains(paragraphIndex),
+    noteCount: noteCountFor(paragraphIndex),
+    onOpenNotes: () => onOpenNotes(paragraphIndex),
+    onJumpToParagraph: onJumpToParagraph,
+    selectable: selectable,
+  );
 
   /// Builds a single paginated page for the cover-turn overlay.
   Widget buildPage(BuildContext context, int pageIndex) {
@@ -188,8 +193,8 @@ class ReaderPageSurface extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (page == 0) _title(),
-                    if (page == 0) const SizedBox(height: 30),
+                    if (page == 0 && showBookTitle) _title(),
+                    if (page == 0 && showBookTitle) const SizedBox(height: 30),
                     for (var index = 0; index < fragments.length; index++)
                       Padding(
                         padding: EdgeInsets.only(
@@ -206,8 +211,9 @@ class ReaderPageSurface extends StatelessWidget {
                           lineSpacing: lineSpacing,
                           fontWeight: fontWeight,
                           ink: ink,
-                          contextMenuBuilder:
-                              contextMenuBuilder(fragments[index].paragraphIndex),
+                          contextMenuBuilder: contextMenuBuilder(
+                            fragments[index].paragraphIndex,
+                          ),
                           highlights: [
                             ...?highlights[fragments[index].paragraphIndex],
                             if (spokenSentence.isNotEmpty) spokenSentence,
@@ -216,10 +222,11 @@ class ReaderPageSurface extends StatelessWidget {
                           isChapterHeading: tocParagraphs.contains(
                             fragments[index].paragraphIndex,
                           ),
-                          noteCount: noteCountFor(fragments[index].paragraphIndex),
-                          onOpenNotes: () => onOpenNotes(
+                          noteCount: noteCountFor(
                             fragments[index].paragraphIndex,
                           ),
+                          onOpenNotes: () =>
+                              onOpenNotes(fragments[index].paragraphIndex),
                           showImage: fragments[index].showImage,
                           showLinkAction: fragments[index].showLinkAction,
                           indentFirstLine: fragments[index].indentFirstLine,

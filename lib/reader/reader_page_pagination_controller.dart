@@ -13,12 +13,18 @@ import 'reader_pagination.dart';
 /// this controller owns the pager, generation cancellation, and async slices.
 class ReaderPaginationController {
   ReaderPaginationController({required ImportedBook book})
-      : _book = book,
-        pager = ProgressiveBookPager(book, _initialLayout);
+    : _book = book,
+      pager = ProgressiveBookPager(book, _initialLayout);
 
   static const int pagesAhead = 100;
   static const int initialPages = 12;
   static const int anchorFoldParagraphs = 4000;
+
+  /// How much already-read context to materialise when a deep anchored window
+  /// is asked to turn backwards from its local first page.  This keeps the
+  /// recovery bounded while still covering many pages for normal chapters.
+  static const int backwardLookbackParagraphs = 256;
+  static const int maxBackwardLookbackParagraphs = 512;
 
   static const _initialLayout = PageLayoutConfig(
     fontSize: 19,
@@ -117,17 +123,9 @@ class ReaderPaginationController {
     required VoidCallback onChanged,
     required bool Function() isActive,
   }) {
-    if (needsReset(
-      config: config,
-      size: size,
-      bottomInset: bottomInset,
-    )) {
+    if (needsReset(config: config, size: size, bottomInset: bottomInset)) {
       final page = reset(config: config, anchorParagraph: anchorParagraph);
-      recordLayout(
-        config: config,
-        size: size,
-        bottomInset: bottomInset,
-      );
+      recordLayout(config: config, size: size, bottomInset: bottomInset);
       onReset(page);
       paginateAsync(
         targetPages: page + pagesAhead,
@@ -136,7 +134,9 @@ class ReaderPaginationController {
       );
       return;
     }
-    if (pageMode && !pager.fullyPaginated && pager.pageCount < currentPage + pagesAhead) {
+    if (pageMode &&
+        !pager.fullyPaginated &&
+        pager.pageCount < currentPage + pagesAhead) {
       paginateAsync(
         targetPages: currentPage + pagesAhead,
         onChanged: onChanged,
@@ -216,6 +216,38 @@ class ReaderPaginationController {
     }
   }
 
+  /// Rebuilds an anchored window with a small amount of content before
+  /// [boundaryParagraph], then returns the local page containing that
+  /// paragraph.  Deep jumps intentionally start at the requested paragraph so
+  /// they are instant; that means local page zero has no predecessor.  This
+  /// method is the bounded, on-demand bridge used by a backwards page turn.
+  ///
+  /// The method never folds the whole book.  It tries a 256-paragraph lookback
+  /// first and expands once to 512 paragraphs only if the target still lands
+  /// on local page zero.  A target at paragraph zero (or an empty book) has no
+  /// predecessor and returns null.
+  int? preparePreviousPage({required int boundaryParagraph}) {
+    final total = _book.paragraphs.length;
+    if (total <= 0) return null;
+    final target = boundaryParagraph.clamp(0, total - 1);
+    if (target <= 0) return null;
+
+    var lookback = backwardLookbackParagraphs;
+    while (true) {
+      final anchor = (target - lookback).clamp(0, target - 1);
+      cancel();
+      pager.paginateFrom(anchor, minPages: initialPages);
+      pager.paginateThrough(target);
+
+      final page = pager.exactPageForParagraph(target);
+      if (page != null && page > 0) return page;
+      if (anchor == 0 || lookback >= maxBackwardLookbackParagraphs) {
+        return page != null && page > 0 ? page : null;
+      }
+      lookback = maxBackwardLookbackParagraphs;
+    }
+  }
+
   int pageForParagraph(int paragraphIndex) {
     final total = _book.paragraphs.length;
     if (pager.isAnchored) {
@@ -238,9 +270,11 @@ class ReaderPaginationController {
       pager.paginateFrom(paragraphIndex, minPages: initialPages);
       return 0;
     }
-    if (paragraphIndex > pager.nextParagraph) pager.paginateThrough(paragraphIndex);
+    if (paragraphIndex > pager.nextParagraph)
+      pager.paginateThrough(paragraphIndex);
     final exact = pager.exactPageForParagraph(paragraphIndex);
-    if (exact != null) return exact.clamp(0, (pager.pageCount - 1).clamp(0, exact));
+    if (exact != null)
+      return exact.clamp(0, (pager.pageCount - 1).clamp(0, exact));
     final ref = pager.pageRefForParagraph(paragraphIndex);
     return (ref.page1 - 1).clamp(0, pager.pageCount - 1);
   }

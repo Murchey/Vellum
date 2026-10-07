@@ -94,14 +94,33 @@ extension ReaderPagePagination on ReaderPageState {
       isActive: () => mounted,
     );
   }
+
+  /// Makes a predecessor page available when a deep anchored window is at its
+  /// local first page.  The paginator keeps the chapter's first visible page
+  /// as the semantic target, then returns that target's new local index so the
+  /// caller can perform the actual previous-page turn.
+  int? preparePreviousPage() {
+    if (readingMode != ReadingMode.page || !pager.isAnchored) return null;
+    if (pages.isEmpty || currentPage > 0) return null;
+    final boundary = pager.firstParagraphOfPage(0) ?? pager.anchorParagraph;
+    final page = pagination.preparePreviousPage(boundaryParagraph: boundary);
+    if (page == null || page <= 0) return null;
+    if (pageController.hasClients) jumpToPageExact(page);
+    refresh(() {
+      currentPage = page;
+      requestedPage = page;
+      pagePositionRestored = true;
+    });
+    paginateAsync(targetPages: page + ReaderPaginationController.pagesAhead);
+    return page;
+  }
+
   int firstParagraphOfCurrentPage() {
     if (pages.isEmpty ||
         pages[currentPage.clamp(0, pages.length - 1)].isEmpty) {
       return 0;
     }
-    return pages[currentPage.clamp(0, pages.length - 1)]
-        .first
-        .paragraphIndex;
+    return pages[currentPage.clamp(0, pages.length - 1)].first.paragraphIndex;
   }
 
   /// Test hooks: the page-mode reading position has to survive a re-layout, and
@@ -360,16 +379,16 @@ extension ReaderPagePagination on ReaderPageState {
       // instead of measuring the whole prefix — the difference between an
       // instant seek and a minute of blocked UI in a 二十四史-sized book.
       final page = pageForParagraph(para).clamp(0, pageCount - 1);
-      paginateAsync(
-        targetPages: page + ReaderPaginationController.pagesAhead,
-      );
+      // `pageForParagraph` may replace the exact prefix with a fresh anchored
+      // window. Move the controller before rebuilding with the shorter
+      // `itemCount`; otherwise its old deep page remains selected while the
+      // new window has only a handful of pages and the next turn is dropped.
+      if (pageController.hasClients) jumpToPageExact(page);
+      paginateAsync(targetPages: page + ReaderPaginationController.pagesAhead);
       refresh(() {
         currentPage = page;
         requestedPage = page;
       });
-      if (pageController.hasClients) {
-        jumpToPageExact(page);
-      }
       scheduleSave();
       return;
     }
@@ -385,7 +404,11 @@ extension ReaderPagePagination on ReaderPageState {
     final entries = chapters;
     if (entries.isEmpty) return;
     final index = chapterIndex.clamp(0, entries.length - 1);
-    jumpToParagraph(entries[index].key, restoreChapter: false);
+    jumpToParagraph(
+      entries[index].key,
+      restoreChapter: false,
+      preloadPreviousPage: true,
+    );
   }
 
   void jumpToScrollParagraph(
@@ -412,7 +435,9 @@ extension ReaderPagePagination on ReaderPageState {
   void refineScrollJump(int target, {int attempt = 0, int? jumpGeneration}) {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      if (jumpGeneration != null && jumpGeneration != jumpGeneration) return;
+      if (jumpGeneration != null && jumpGeneration != this.jumpGeneration) {
+        return;
+      }
       var ctx = paragraphKeys[target]?.currentContext;
       if (ctx == null) {
         // Target not built yet: step toward the nearest mounted paragraph so
@@ -452,7 +477,7 @@ extension ReaderPagePagination on ReaderPageState {
         );
       }
       if (mounted) {
-        if (jumpGeneration != null && jumpGeneration != jumpGeneration) {
+        if (jumpGeneration != null && jumpGeneration != this.jumpGeneration) {
           return;
         }
         refresh(() => currentParagraph = target);
@@ -514,7 +539,11 @@ extension ReaderPagePagination on ReaderPageState {
     clearSearchHighlight();
   }
 
-  void jumpToParagraph(int paragraphIndex, {bool restoreChapter = false}) {
+  void jumpToParagraph(
+    int paragraphIndex, {
+    bool restoreChapter = false,
+    bool preloadPreviousPage = false,
+  }) {
     final generation = ++jumpGeneration;
     cancelPagination();
     final maxIndex = widget.book.paragraphs.isEmpty
@@ -530,26 +559,32 @@ extension ReaderPagePagination on ReaderPageState {
       }
     }
     if (readingMode == ReadingMode.page) {
-      final page = pageForParagraph(target).clamp(0, pageCount - 1);
-      if (pageController.hasClients) {
-        pageController
-            .animateToPage(
-              page,
-              duration: const Duration(milliseconds: 160),
-              curve: Curves.easeOutCubic,
-            )
-            .whenComplete(() {
-              if (!mounted || generation != jumpGeneration) return;
-              refresh(() {
-                currentPage = page;
-                requestedPage = page;
-              });
-              scheduleSave();
-            });
-        refresh(() {
-          requestedPage = page;
-        });
+      var page = pageForParagraph(target).clamp(0, pageCount - 1);
+      if (preloadPreviousPage && page == 0 && pager.isAnchored) {
+        final prepared = pagination.preparePreviousPage(
+          boundaryParagraph: target,
+        );
+        if (prepared != null) page = prepared;
       }
+      // A chapter jump can re-anchor the pager and shrink PageView's itemCount
+      // from an old deep page to the new 12-page window. Clamp the controller
+      // and both page fields before the rebuild so PageView never observes an
+      // out-of-range current page. The old animation used to complete against
+      // the discarded window (or never complete), leaving forward taps stuck.
+      if (pageController.hasClients) jumpToPageExact(page);
+      refresh(() {
+        currentPage = page;
+        requestedPage = page;
+        pagePositionRestored = true;
+      });
+      pagination.paginateAsync(
+        targetPages: page + ReaderPaginationController.pagesAhead,
+        onChanged: () {
+          if (mounted) refresh(() {});
+        },
+        isActive: () => mounted && generation == jumpGeneration,
+      );
+      scheduleSave();
       return;
     }
     jumpToScrollParagraph(
@@ -558,6 +593,4 @@ extension ReaderPagePagination on ReaderPageState {
       jumpGeneration: generation,
     );
   }
-
-
 }

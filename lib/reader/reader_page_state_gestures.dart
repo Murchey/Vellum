@@ -117,10 +117,19 @@ extension ReaderPageGestures on ReaderPageState {
     const intent = 10.0;
     if (!dragTurn) {
       if (dx.abs() < intent) return;
-      final totalPages = pageCount;
+      var totalPages = pageCount;
       if (totalPages <= 0) return;
-      final from = currentPage.clamp(0, totalPages - 1);
-      final to = dx < 0 ? from + 1 : from - 1;
+      var from = currentPage.clamp(0, totalPages - 1);
+      var to = dx < 0 ? from + 1 : from - 1;
+      if (to < 0 && dx > 0) {
+        // Rightward drags from the first page of an anchored deep window need
+        // the same bounded predecessor materialisation as screen taps.
+        final prepared = preparePreviousPage();
+        if (prepared == null) return;
+        totalPages = pageCount;
+        from = prepared;
+        to = from - 1;
+      }
       if (to < 0 || to >= totalPages) return;
       if (!pager.fullyPaginated && to >= pager.pageCount) {
         pager.paginateUntilPages(to + 1);
@@ -408,9 +417,7 @@ extension ReaderPageGestures on ReaderPageState {
     }
   }
 
-  EditableTextContextMenuBuilder contextMenuForParagraph(
-    int paragraphIndex,
-  ) =>
+  EditableTextContextMenuBuilder contextMenuForParagraph(int paragraphIndex) =>
       createReaderSelectionToolbar(
         bookId: bookId,
         bookTitle: widget.book.title,
@@ -430,4 +437,4 @@ extension ReaderPageGestures on ReaderPageState {
     maybeExtendPagination();
     scheduleSave();
   }
-  }
+}
